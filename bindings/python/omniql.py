@@ -102,6 +102,8 @@ _lib = _load_lib()
 class QueryOptions:
     limit: int = 0
     skip: int = 0
+    sort: Dict[str, int] = field(default_factory=dict)
+    fields: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

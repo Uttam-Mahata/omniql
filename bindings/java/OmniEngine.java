@@ -219,6 +219,16 @@ public class OmniEngine implements AutoCloseable {
             return this;
         }
 
+        public QueryBuilder sort(Map<String, Integer> sort) {
+            this.query.options.sort = sort;
+            return this;
+        }
+
+        public QueryBuilder fields(Map<String, Object> fields) {
+            this.query.options.fields = fields;
+            return this;
+        }
+
         public OmniResult execute() {
             return engine.execute(query);
         }
@@ -235,6 +245,8 @@ public class OmniEngine implements AutoCloseable {
         public static class Options {
             public int limit;
             public int skip;
+            public Map<String, Integer> sort;
+            public Map<String, Object> fields;
         }
     }
 

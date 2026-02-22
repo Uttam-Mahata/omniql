@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
@@ -53,7 +54,10 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 
 // find builds and executes a SELECT statement.
 func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args := buildWhere(query.Filter)
+	where, args, err := buildWhere(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", quote(query.Target))
 	if where != "" {
@@ -68,10 +72,57 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 		return []map[string]interface{}{{"count": total}}, total, nil
 	}
 
-	selectSQL := fmt.Sprintf("SELECT * FROM %s", quote(query.Target))
+	fields := "*"
+	if len(query.Options.Fields) > 0 {
+		var cols []string
+		for field, val := range query.Options.Fields {
+			// Check for inclusion (1)
+			include := false
+			switch v := val.(type) {
+			case int:
+				if v == 1 {
+					include = true
+				}
+			case float64:
+				if v == 1 {
+					include = true
+				}
+			}
+
+			if include {
+				cols = append(cols, quote(field))
+			}
+		}
+		if len(cols) > 0 {
+			sort.Strings(cols) // Sort for deterministic SQL
+			fields = strings.Join(cols, ", ")
+		}
+	}
+
+	selectSQL := fmt.Sprintf("SELECT %s FROM %s", fields, quote(query.Target))
 	if where != "" {
 		selectSQL += " WHERE " + where
 	}
+
+	if len(query.Options.Sort) > 0 {
+		var sortClauses []string
+		keys := make([]string, 0, len(query.Options.Sort))
+		for k := range query.Options.Sort {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			val := query.Options.Sort[k]
+			order := "ASC"
+			if val == -1 {
+				order = "DESC"
+			}
+			sortClauses = append(sortClauses, quote(k)+" "+order)
+		}
+		selectSQL += " ORDER BY " + strings.Join(sortClauses, ", ")
+	}
+
 	if query.Options.Limit > 0 {
 		selectSQL += fmt.Sprintf(" LIMIT %d", query.Options.Limit)
 	}
@@ -105,18 +156,19 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 		i++
 	}
 
-	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
 		quote(query.Target),
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
 	)
 
-	result, err := d.db.ExecContext(ctx, stmt, vals...)
+	rows, err := d.db.QueryContext(ctx, stmt, vals...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres insert: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	return []map[string]interface{}{}, affected, nil
+	defer rows.Close()
+
+	return scanRows(rows, 1)
 }
 
 // update builds and executes an UPDATE statement.
@@ -134,7 +186,10 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 		i++
 	}
 
-	where, whereArgs := buildWhereFrom(query.Filter, i)
+	where, whereArgs, err := buildWhereFrom(query.Filter, i)
+	if err != nil {
+		return nil, 0, err
+	}
 	args = append(args, whereArgs...)
 
 	stmt := fmt.Sprintf("UPDATE %s SET %s", quote(query.Target), strings.Join(setClauses, ", "))
@@ -152,7 +207,10 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 
 // delete builds and executes a DELETE statement.
 func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args := buildWhere(query.Filter)
+	where, args, err := buildWhere(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	stmt := fmt.Sprintf("DELETE FROM %s", quote(query.Target))
 	if where != "" {
@@ -169,14 +227,14 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 
 // buildWhere translates an OQL Filter into a parameterised SQL WHERE clause.
 // Parameters are numbered from $1.
-func buildWhere(filter core.Filter) (string, []interface{}) {
+func buildWhere(filter core.Filter) (string, []interface{}, error) {
 	return buildWhereFrom(filter, 1)
 }
 
 // buildWhereFrom is like buildWhere but starts parameter numbering at startIdx.
-func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
+func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, error) {
 	if len(filter) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 
 	clauses := make([]string, 0, len(filter))
@@ -184,6 +242,37 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
 	i := startIdx
 
 	for field, constraint := range filter {
+		if field == "$or" || field == "$and" {
+			list, ok := toSlice(constraint)
+			if !ok {
+				return "", nil, fmt.Errorf("postgres: %s requires a slice", field)
+			}
+			subClauses := make([]string, 0, len(list))
+			for _, item := range list {
+				subFilter, ok := item.(map[string]interface{})
+				if !ok {
+					return "", nil, fmt.Errorf("postgres: %s elements must be objects", field)
+				}
+				subWhere, subArgs, err := buildWhereFrom(subFilter, i)
+				if err != nil {
+					return "", nil, err
+				}
+				if subWhere != "" {
+					subClauses = append(subClauses, "("+subWhere+")")
+					args = append(args, subArgs...)
+					i += len(subArgs)
+				}
+			}
+			op := " OR "
+			if field == "$and" {
+				op = " AND "
+			}
+			if len(subClauses) > 0 {
+				clauses = append(clauses, "("+strings.Join(subClauses, op)+")")
+			}
+			continue
+		}
+
 		switch c := constraint.(type) {
 		case map[string]interface{}:
 			for op, val := range c {
@@ -214,6 +303,9 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
 					i++
 				case "$in":
 					if vals, ok := toSlice(val); ok {
+						if len(vals) == 0 {
+							return "", nil, fmt.Errorf("postgres: $in requires non-empty slice")
+						}
 						placeholders := make([]string, len(vals))
 						for j, v := range vals {
 							placeholders[j] = fmt.Sprintf("$%d", i)
@@ -221,9 +313,14 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
 							i++
 						}
 						clauses = append(clauses, fmt.Sprintf("%s IN (%s)", quote(field), strings.Join(placeholders, ", ")))
+					} else {
+						return "", nil, fmt.Errorf("postgres: $in requires a slice")
 					}
 				case "$nin":
 					if vals, ok := toSlice(val); ok {
+						if len(vals) == 0 {
+							return "", nil, fmt.Errorf("postgres: $nin requires non-empty slice")
+						}
 						placeholders := make([]string, len(vals))
 						for j, v := range vals {
 							placeholders[j] = fmt.Sprintf("$%d", i)
@@ -231,7 +328,11 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
 							i++
 						}
 						clauses = append(clauses, fmt.Sprintf("%s NOT IN (%s)", quote(field), strings.Join(placeholders, ", ")))
+					} else {
+						return "", nil, fmt.Errorf("postgres: $nin requires a slice")
 					}
+				default:
+					return "", nil, fmt.Errorf("postgres: unsupported operator %q", op)
 				}
 			}
 		default:
@@ -242,7 +343,7 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}) {
 		}
 	}
 
-	return strings.Join(clauses, " AND "), args
+	return strings.Join(clauses, " AND "), args, nil
 }
 
 // scanRows converts *sql.Rows into a slice of generic maps.
