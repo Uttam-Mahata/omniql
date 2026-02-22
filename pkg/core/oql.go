@@ -6,11 +6,12 @@ package core
 type Action string
 
 const (
-	ActionFind   Action = "FIND"
-	ActionInsert Action = "INSERT"
-	ActionUpdate Action = "UPDATE"
-	ActionDelete Action = "DELETE"
-	ActionCount  Action = "COUNT"
+	ActionFind        Action = "FIND"
+	ActionInsert      Action = "INSERT"
+	ActionBatchInsert Action = "BATCH_INSERT"
+	ActionUpdate      Action = "UPDATE"
+	ActionDelete      Action = "DELETE"
+	ActionCount       Action = "COUNT"
 )
 
 // Filter is a map of field names to constraint expressions.
@@ -45,8 +46,11 @@ type OQLQuery struct {
 	// Filter contains the constraint expressions used to select records.
 	Filter Filter `json:"filter,omitempty"`
 
-	// Document is the data payload for INSERT / UPDATE operations.
+	// Document is the data payload for single INSERT / UPDATE operations.
 	Document map[string]interface{} `json:"document,omitempty"`
+
+	// Documents is the data payload for BATCH_INSERT operations.
+	Documents []map[string]interface{} `json:"documents,omitempty"`
 
 	// Options holds optional modifiers (limit, skip, sort, projection).
 	Options QueryOptions `json:"options,omitempty"`

@@ -88,7 +88,16 @@ func (e *Engine) Execute(ctx context.Context, query OQLQuery) (*OmniJSON, error)
 		return errorResponse(err, "DRIVER_ERROR"), nil
 	}
 
-	rows, total, err := driver.Execute(ctx, query)
+	var rows []map[string]interface{}
+	var total int64
+
+	if query.Action == ActionBatchInsert {
+		rows, err = driver.BatchInsert(ctx, query.Target, query.Documents)
+		total = int64(len(rows))
+	} else {
+		rows, total, err = driver.Execute(ctx, query)
+	}
+
 	if err != nil {
 		return errorResponse(err, "EXECUTION_ERROR"), nil
 	}
