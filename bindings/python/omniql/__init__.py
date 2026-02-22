@@ -75,8 +75,10 @@ _ffi.cdef(
 _LIB_SEARCH_PATHS = [
     os.path.join(os.path.dirname(__file__), "libomniql.so"),
     os.path.join(os.path.dirname(__file__), "omniql.dll"),
+    os.path.join(os.path.dirname(__file__), "libomniql.dylib"),
     "libomniql.so",
     "omniql.dll",
+    "libomniql.dylib",
 ]
 
 

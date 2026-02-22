@@ -94,6 +94,7 @@ export interface CollectionSchema {
 
 const LIB_SEARCH_PATHS = [
   path.join(__dirname, 'libomniql.so'),
+  path.join(__dirname, 'libomniql.dylib'),
   path.join(__dirname, 'omniql.dll'),
   'libomniql',
 ];

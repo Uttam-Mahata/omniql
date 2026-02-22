@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "cffi>=1.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omniql"
+version = "0.5.0"
+description = "A standardized, multi-database query language (OQL) for Python."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "Uttam Mahata", email = "uttam-mahata-cs@outlook.com"},
+]
+dependencies = [
+    "cffi>=1.0.0",
+]
+
+[tool.setuptools]
+packages = ["omniql"]
+package-dir = {"" = "."}
+
+[tool.setuptools.package-data]
+omniql = ["*.so", "*.dll", "*.dylib"]
