@@ -95,12 +95,12 @@ const lib = koffi.load(findLibPath());
 // Function definitions
 const OmniQL_NewEngine = lib.func('int OmniQL_NewEngine()');
 const OmniQL_FreeEngine = lib.func('void OmniQL_FreeEngine(int)');
-const OmniQL_Execute = lib.func('char *OmniQL_Execute(int, const char *)');
-const OmniQL_RegisterSchema = lib.func('char *OmniQL_RegisterSchema(int, const char *)');
-const OmniQL_Route = lib.func('char *OmniQL_Route(int, const char *, const char *)');
-const OmniQL_RegisterSQLiteDriver = lib.func('char *OmniQL_RegisterSQLiteDriver(int, const char *)');
-const OmniQL_RegisterPostgresDriver = lib.func('char *OmniQL_RegisterPostgresDriver(int, const char *)');
-const OmniQL_RegisterMongoDriver = lib.func('char *OmniQL_RegisterMongoDriver(int, const char *, const char *)');
+const OmniQL_Execute = lib.func('void *OmniQL_Execute(int, const char *)');
+const OmniQL_RegisterSchema = lib.func('void *OmniQL_RegisterSchema(int, const char *)');
+const OmniQL_Route = lib.func('void *OmniQL_Route(int, const char *, const char *)');
+const OmniQL_RegisterSQLiteDriver = lib.func('void *OmniQL_RegisterSQLiteDriver(int, const char *)');
+const OmniQL_RegisterPostgresDriver = lib.func('void *OmniQL_RegisterPostgresDriver(int, const char *)');
+const OmniQL_RegisterMongoDriver = lib.func('void *OmniQL_RegisterMongoDriver(int, const char *, const char *)');
 const OmniQL_Free = lib.func('void OmniQL_Free(void *)');
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ export class OmniEngine {
    */
   private callNative(fn: (...args: any[]) => any, ...args: any[]): string {
     const raw = fn(this.handle, ...args);
-    if (!raw) return '{}';
+    if (!raw || koffi.address(raw) === 0n) return '{}';
     try {
       return koffi.decode(raw, 'char *') as string;
     } finally {
