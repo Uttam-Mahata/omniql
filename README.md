@@ -1,6 +1,6 @@
 # OmniQL — One Query Language, Every Database.
 
-> **Version:** v0.5.0
+> **Version:** v0.5.7
 > **Module:** `github.com/Uttam-Mahata/omniql`
 
 OmniQL is a unified data access layer that abstracts away the complexity of
@@ -50,7 +50,7 @@ handles its own query translation and execution.
 | Time-Series        | InfluxDB, TimescaleDB, QuestDB                           | Time-windowed aggregations                  |
 | Graph              | Neo4j, SurrealDB, Memgraph                               | Relationship / traversal queries            |
 
-**v0.5.0 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
+**v0.5.7 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
 
 ---
 
@@ -117,10 +117,10 @@ omniql/
 │       ├── wrappers.go     # Go-typed shims used by the test suite
 │       └── ffi_test.go     # FFI smoke tests
 ├── bindings/
-│   ├── java/               # JNI wrapper — OmniEngine.java
-│   ├── python/             # CFFI extension — omniql.py
-│   ├── csharp/             # P/Invoke wrapper — OmniEngine.cs
-│   └── typescript/         # ffi-napi addon — omniql.ts
+│   ├── java/               # JNI wrapper — Maven Central
+│   ├── python/             # CFFI extension — PyPI
+│   ├── csharp/             # P/Invoke wrapper — NuGet
+│   └── typescript/         # Node-API addon — npm
 └── cmd/omniql/             # CLI entry-point
 ```
 
@@ -164,6 +164,121 @@ func main() {
 
 ---
 
+## Multi-Language Bindings
+
+All bindings follow the same three-step pattern:
+
+1. **Register a driver** — tells the engine how to connect to the database.
+2. **Route a target** — maps a collection/table name to the registered driver.
+3. **Execute queries** — run OQL queries through the engine.
+
+### Python
+
+Install via pip:
+
+```bash
+pip install omniql
+```
+
+Usage:
+
+```python
+import asyncio
+from omniql import OmniEngine, Query
+
+async def main():
+    engine = OmniEngine()
+    driver = await engine.register_sqlite_driver(":memory:")
+    await engine.route("users", driver)
+
+    result = await engine.execute(Query(
+        target="users",
+        action="FIND",
+        filter={"status": "active"}
+    ))
+    print(result.data)
+
+asyncio.run(main())
+```
+
+### Java
+
+Add the following dependency to your `pom.xml`:
+
+```xml
+<dependency>
+    <groupId>io.omniql</groupId>
+    <artifactId>omniql</artifactId>
+    <version>0.5.6</version>
+</dependency>
+```
+
+Usage:
+
+```java
+import io.omniql.OmniEngine;
+import java.util.Map;
+
+OmniEngine engine = OmniEngine.create();
+String driver = engine.registerSQLiteDriver(":memory:");
+engine.route("users", driver);
+
+var result = engine.table("users")
+    .find(Map.of("status", "active"))
+    .execute();
+```
+
+### C# / .NET
+
+Install via NuGet:
+
+```bash
+dotnet add package OmniQL
+```
+
+Usage:
+
+```csharp
+using OmniQL;
+
+using var engine = new OmniEngine();
+string driver = engine.RegisterSQLiteDriver(":memory:");
+engine.Route("users", driver);
+
+var result = await engine.Table("users")
+    .Find(new Dictionary<string, object> { { "status", "active" } })
+    .ExecuteAsync();
+```
+
+### TypeScript / Node.js
+
+Install via npm:
+
+```bash
+npm install omniql
+```
+
+Usage:
+
+```typescript
+import { OmniEngine } from 'omniql';
+
+const engine = new OmniEngine();
+const driver = engine.registerSQLiteDriver(':memory:');
+engine.route('users', driver);
+
+const result = await engine.execute({
+  target: 'users',
+  action: 'FIND',
+  filter: { status: 'active' }
+});
+
+console.log(result.data);
+engine.close();
+```
+
+---
+
 ## CLI
 
 The `omniql` binary lets you run ad-hoc OQL queries from the command line.
@@ -182,7 +297,7 @@ omniql -driver <sqlite|postgres|mongo> -dsn <dsn> [-db <dbname>] -query '<OQL JS
 |-----------|------------------------------------------------------------------|
 | `-driver` | Database driver: `sqlite`, `postgres`, or `mongo`               |
 | `-dsn`    | Connection string / file path / MongoDB URI                      |
-| `-db`     | Database name (required for `mongo`)                             |
+| `-db`    | Database name (required for `mongo`)                             |
 | `-query`  | JSON-encoded OQL query                                           |
 
 ### Examples
@@ -200,133 +315,6 @@ omniql -driver postgres \
 # MongoDB
 omniql -driver mongo -dsn "mongodb://localhost:27017" -db mydb \
   -query '{"target":"products","action":"COUNT","filter":{"price":{"$lt":100}}}'
-```
-
----
-
-## Building the FFI Shared Library
-
-> **Note:** `pkg/ffi` uses `package main` — this is required by Go's
-> `-buildmode=c-shared` flag and does not affect any other package.
-
-```bash
-go build -buildmode=c-shared -o libomniql.so ./pkg/ffi
-```
-
-This produces `libomniql.so` (Linux) / `omniql.dll` (Windows) which the
-language bindings load at runtime.
-
-### Exported C API
-
-| Function                                        | Description                                               |
-|-------------------------------------------------|-----------------------------------------------------------|
-| `OmniQL_NewEngine() → int`                      | Create a new engine; returns an opaque handle             |
-| `OmniQL_FreeEngine(handle)`                     | Release an engine and all its resources                   |
-| `OmniQL_RegisterSQLiteDriver(handle, dsn)`      | Open a SQLite connection and register it; returns `{"driver":"sqlite"}` |
-| `OmniQL_RegisterPostgresDriver(handle, connStr)`| Open a Postgres connection and register it; returns `{"driver":"postgres"}` |
-| `OmniQL_RegisterMongoDriver(handle, uri, db)`   | Connect to MongoDB and register it; returns `{"driver":"mongo"}` |
-| `OmniQL_Route(handle, target, driverName)`      | Bind a collection/table target to a registered driver     |
-| `OmniQL_Execute(handle, queryJSON)`             | Execute a JSON-encoded OQL query; returns JSON response   |
-| `OmniQL_RegisterSchema(handle, schemaJSON)`     | Register a collection schema for validation               |
-| `OmniQL_Free(ptr)`                              | Free a string returned by any of the above                |
-
-All functions that return a string (`char*`) must be freed with `OmniQL_Free`.
-
----
-
-## Multi-Language Bindings
-
-| Language    | Mechanism        | Location                    |
-|-------------|------------------|-----------------------------|
-| Java        | JNI              | `bindings/java/`            |
-| Python      | CFFI + asyncio   | `bindings/python/`          |
-| C# / .NET   | P/Invoke         | `bindings/csharp/`          |
-| TypeScript  | ffi-napi (N-API) | `bindings/typescript/`      |
-
-All bindings follow the same three-step pattern:
-
-1. **Register a driver** — tells the engine how to connect to the database.
-2. **Route a target** — maps a collection/table name to the registered driver.
-3. **Execute queries** — run OQL queries through the engine.
-
-### Python
-
-```python
-import asyncio
-from omniql import OmniEngine, Query
-
-async def main():
-    engine = OmniEngine()
-
-    driver = await engine.register_sqlite_driver(":memory:")
-    await engine.route("users", driver)
-
-    result = await engine.execute(Query(
-        target="users",
-        action="FIND",
-        filter={"status": "active"},
-        options={"limit": 10, "sort": {"price": -1}},
-    ))
-    print(result.data)
-
-asyncio.run(main())
-```
-
-### Java
-
-```java
-OmniEngine engine = OmniEngine.create();
-
-String driver = engine.registerSQLiteDriver(":memory:");
-engine.route("users", driver);
-
-OmniResult result = engine.table("users")
-    .find(Map.of("status", "active"))
-    .limit(10)
-    .sort(Map.of("price", -1))
-    .execute();
-```
-
-### C# / .NET
-
-```csharp
-using OmniQL;
-
-using var engine = new OmniEngine();
-
-string driver = engine.RegisterSQLiteDriver(":memory:");
-engine.Route("users", driver);
-
-var result = await engine
-    .Table("users")
-    .Find(new Dictionary<string, object> { { "status", "active" } })
-    .Limit(10)
-    .Sort(new Dictionary<string, int> { { "price", -1 } })
-    .ExecuteAsync();
-
-foreach (var row in result.Data)
-    Console.WriteLine(row["name"]);
-```
-
-### TypeScript
-
-```typescript
-import { OmniEngine } from 'omniql';
-
-const engine = new OmniEngine();
-
-const driver = engine.registerSQLiteDriver(':memory:');
-engine.route('users', driver);
-
-const result = await engine.execute({
-  target: 'users',
-  action: 'FIND',
-  filter: { status: 'active' },
-  options: { limit: 10, sort: { price: -1 } },
-});
-
-console.log(result.data);
-engine.close();
 ```
 
 ---
@@ -357,7 +345,7 @@ go test ./...
 
 ## Advanced Features (Roadmap)
 
-### v0.5.0 (Upcoming)
+### v0.5.0 (Released)
 - **Mixed Projection** — Support mixed include/exclude projection (requires schema awareness).
 - **Transactions** — `BeginTx` / `Commit` / `Rollback` as an optional `TransactionalDriver` interface.
 - **Batch inserts** — insert multiple documents in a single round-trip.

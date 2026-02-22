@@ -36,7 +36,7 @@ import java.util.Map;
 public class OmniEngine implements AutoCloseable {
 
     static {
-        System.loadLibrary("omniql");
+        NativeLoader.load();
     }
 
     // -------------------------------------------------------------------------
