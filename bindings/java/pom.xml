@@ -6,7 +6,7 @@
 
     <groupId>io.omniql</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.6.2</version>
+    <version>0.6.4</version>
     <name>OmniQL Java Binding</name>
     <description>A standardized, multi-database query language (OQL) for Java.</description>
     <url>https://github.com/Uttam-Mahata/omniql</url>
@@ -90,7 +90,7 @@
                         <configuration>
                             <serverId>ossrh</serverId>
                             <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
-                            <autoReleaseAfterClose>true</autoReleaseReleaseAfterClose>
+                            <autoReleaseAfterClose>true</autoReleaseAfterClose>
                         </configuration>
                     </plugin>
                 </plugins>
