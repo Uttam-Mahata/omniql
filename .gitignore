@@ -68,3 +68,4 @@ MANIFEST
 logs/
 .tokens
 examples/
+bindings/java/target
