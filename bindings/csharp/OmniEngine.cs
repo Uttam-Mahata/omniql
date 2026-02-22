@@ -91,6 +91,8 @@ namespace OmniQL
     {
         [JsonPropertyName("limit")] public int Limit { get; set; }
         [JsonPropertyName("skip")]  public int Skip  { get; set; }
+        [JsonPropertyName("sort")]   public Dictionary<string, int>? Sort   { get; set; }
+        [JsonPropertyName("fields")] public Dictionary<string, object>? Fields { get; set; }
     }
 
     public class OmniResult
@@ -285,6 +287,9 @@ namespace OmniQL
 
         public QueryBuilder Limit(int n)  { _query.Options.Limit = n; return this; }
         public QueryBuilder Skip(int n)   { _query.Options.Skip  = n; return this; }
+
+        public QueryBuilder Sort(Dictionary<string, int> sort) { _query.Options.Sort = sort; return this; }
+        public QueryBuilder Fields(Dictionary<string, object> fields) { _query.Options.Fields = fields; return this; }
 
         public Task<OmniResult> ExecuteAsync() => _engine.ExecuteAsync(_query);
     }

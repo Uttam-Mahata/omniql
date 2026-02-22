@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
@@ -60,7 +61,10 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 }
 
 func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args := buildWhere(query.Filter)
+	where, args, err := buildWhere(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	countSQL := "SELECT COUNT(*) FROM " + quote(query.Target)
 	if where != "" {
@@ -75,10 +79,57 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 		return []map[string]interface{}{{"count": total}}, total, nil
 	}
 
-	selectSQL := "SELECT * FROM " + quote(query.Target)
+	fields := "*"
+	if len(query.Options.Fields) > 0 {
+		var cols []string
+		for field, val := range query.Options.Fields {
+			// Check for inclusion (1)
+			include := false
+			switch v := val.(type) {
+			case int:
+				if v == 1 {
+					include = true
+				}
+			case float64:
+				if v == 1 {
+					include = true
+				}
+			}
+
+			if include {
+				cols = append(cols, quote(field))
+			}
+		}
+		if len(cols) > 0 {
+			sort.Strings(cols) // Sort for deterministic SQL
+			fields = strings.Join(cols, ", ")
+		}
+	}
+
+	selectSQL := "SELECT " + fields + " FROM " + quote(query.Target)
 	if where != "" {
 		selectSQL += " WHERE " + where
 	}
+
+	if len(query.Options.Sort) > 0 {
+		var sortClauses []string
+		keys := make([]string, 0, len(query.Options.Sort))
+		for k := range query.Options.Sort {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			val := query.Options.Sort[k]
+			order := "ASC"
+			if val == -1 {
+				order = "DESC"
+			}
+			sortClauses = append(sortClauses, quote(k)+" "+order)
+		}
+		selectSQL += " ORDER BY " + strings.Join(sortClauses, ", ")
+	}
+
 	if query.Options.Limit > 0 {
 		selectSQL += fmt.Sprintf(" LIMIT %d", query.Options.Limit)
 	}
@@ -119,8 +170,12 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 	if err != nil {
 		return nil, 0, fmt.Errorf("sqlite insert: %w", err)
 	}
-	affected, _ := result.RowsAffected()
-	return []map[string]interface{}{}, affected, nil
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, 0, fmt.Errorf("sqlite insert id: %w", err)
+	}
+	return []map[string]interface{}{{"id": id}}, 1, nil
 }
 
 func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
@@ -135,7 +190,10 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 		args = append(args, val)
 	}
 
-	where, whereArgs := buildWhere(query.Filter)
+	where, whereArgs, err := buildWhere(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 	args = append(args, whereArgs...)
 
 	stmt := "UPDATE " + quote(query.Target) + " SET " + strings.Join(setClauses, ", ")
@@ -152,7 +210,10 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 }
 
 func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args := buildWhere(query.Filter)
+	where, args, err := buildWhere(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	stmt := "DELETE FROM " + quote(query.Target)
 	if where != "" {
@@ -169,15 +230,47 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 
 // buildWhere translates an OQL Filter into a parameterised SQL WHERE clause.
 // SQLite uses ? as the parameter placeholder.
-func buildWhere(filter core.Filter) (string, []interface{}) {
+func buildWhere(filter core.Filter) (string, []interface{}, error) {
 	if len(filter) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 
 	clauses := make([]string, 0, len(filter))
 	args := make([]interface{}, 0, len(filter))
 
 	for field, constraint := range filter {
+		if field == "$or" || field == "$and" {
+			list, ok := toSlice(constraint)
+			if !ok {
+				return "", nil, fmt.Errorf("sqlite: %s requires a slice", field)
+			}
+			subClauses := make([]string, 0, len(list))
+			for _, item := range list {
+				subFilter, ok := item.(map[string]interface{})
+				if !ok {
+					// Also handle core.Filter alias if possible, but map[string]interface{} covers it.
+					// If json unmarshal produces map[string]interface{}, we are good.
+					return "", nil, fmt.Errorf("sqlite: %s elements must be objects", field)
+				}
+				subWhere, subArgs, err := buildWhere(subFilter)
+				if err != nil {
+					return "", nil, err
+				}
+				if subWhere != "" {
+					subClauses = append(subClauses, "("+subWhere+")")
+					args = append(args, subArgs...)
+				}
+			}
+			op := " OR "
+			if field == "$and" {
+				op = " AND "
+			}
+			if len(subClauses) > 0 {
+				clauses = append(clauses, "("+strings.Join(subClauses, op)+")")
+			}
+			continue
+		}
+
 		switch c := constraint.(type) {
 		case map[string]interface{}:
 			for op, val := range c {
@@ -202,22 +295,34 @@ func buildWhere(filter core.Filter) (string, []interface{}) {
 					args = append(args, val)
 				case "$in":
 					if vals, ok := toSlice(val); ok {
+						if len(vals) == 0 {
+							return "", nil, fmt.Errorf("sqlite: $in requires non-empty slice")
+						}
 						placeholders := make([]string, len(vals))
 						for i, v := range vals {
 							placeholders[i] = "?"
 							args = append(args, v)
 						}
 						clauses = append(clauses, quote(field)+" IN ("+strings.Join(placeholders, ", ")+")")
+					} else {
+						return "", nil, fmt.Errorf("sqlite: $in requires a slice")
 					}
 				case "$nin":
 					if vals, ok := toSlice(val); ok {
+						if len(vals) == 0 {
+							return "", nil, fmt.Errorf("sqlite: $nin requires non-empty slice")
+						}
 						placeholders := make([]string, len(vals))
 						for i, v := range vals {
 							placeholders[i] = "?"
 							args = append(args, v)
 						}
 						clauses = append(clauses, quote(field)+" NOT IN ("+strings.Join(placeholders, ", ")+")")
+					} else {
+						return "", nil, fmt.Errorf("sqlite: $nin requires a slice")
 					}
+				default:
+					return "", nil, fmt.Errorf("sqlite: unsupported operator %q", op)
 				}
 			}
 		default:
@@ -226,7 +331,7 @@ func buildWhere(filter core.Filter) (string, []interface{}) {
 		}
 	}
 
-	return strings.Join(clauses, " AND "), args
+	return strings.Join(clauses, " AND "), args, nil
 }
 
 // scanRows converts *sql.Rows into a slice of generic maps.
