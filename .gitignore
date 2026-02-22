@@ -67,3 +67,4 @@ MANIFEST
 *.skill
 logs/
 .tokens
+examples/

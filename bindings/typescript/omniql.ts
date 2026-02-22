@@ -2,41 +2,20 @@
  * OmniQL TypeScript / Node.js Binding
  * =====================================
  *
- * A Node.js addon using N-API that wraps the OmniQL shared library and exposes
- * a fully type-safe, Promise-based API with generated TypeScript definitions.
- *
- * Build the native library first:
- *   go build -buildmode=c-shared -o libomniql.so ../../pkg/ffi
- *
- * Install:
- *   npm install
+ * A modern, low-friction Node.js binding built with Koffi that wraps the
+ * OmniQL shared library.
  *
  * Example usage:
- *   import { OmniEngine, Query } from 'omniql';
+ *   import { OmniEngine } from 'omniql';
  *
  *   const engine = new OmniEngine();
- *
- *   // 1. Register a driver and route a target to it.
- *   const driverName = engine.registerSQLiteDriver(':memory:');
- *   engine.route('analytics_data', driverName);
- *
- *   // 2. Execute a query.
- *   const result = await engine.execute({
- *     target: 'analytics_data',
- *     action: 'FIND',
- *     filter: {
- *       category: { $in: ['electronics', 'books'] },
- *       price:    { $lt: 500 },
- *     },
- *     options: { limit: 20 },
- *   });
- *
- *   console.log(result.data);
+ *   const driver = engine.registerSQLiteDriver(':memory:');
+ *   engine.route('data', driver);
+ *   const result = await engine.execute({ target: 'data', action: 'FIND' });
  *   engine.close();
  */
 
-import * as ffi from 'ffi-napi';
-import * as ref from 'ref-napi';
+import * as koffi from 'koffi';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -96,47 +75,57 @@ const LIB_SEARCH_PATHS = [
   path.join(__dirname, 'libomniql.so'),
   path.join(__dirname, 'libomniql.dylib'),
   path.join(__dirname, 'omniql.dll'),
-  'libomniql',
+  path.join(process.cwd(), 'libomniql.so'),
+  path.join(process.cwd(), 'libomniql.dylib'),
+  path.join(process.cwd(), 'omniql.dll'),
 ];
 
-function loadLib(): ReturnType<typeof ffi.Library> {
+function findLibPath(): string {
   for (const p of LIB_SEARCH_PATHS) {
-    if (fs.existsSync(p)) {
-      return ffi.Library(p, {
-        OmniQL_NewEngine:              ['int',    []],
-        OmniQL_FreeEngine:             ['void',   ['int']],
-        OmniQL_Execute:                ['string', ['int', 'string']],
-        OmniQL_RegisterSchema:         ['string', ['int', 'string']],
-        OmniQL_Route:                  ['string', ['int', 'string', 'string']],
-        OmniQL_RegisterSQLiteDriver:   ['string', ['int', 'string']],
-        OmniQL_RegisterPostgresDriver: ['string', ['int', 'string']],
-        OmniQL_RegisterMongoDriver:    ['string', ['int', 'string', 'string']],
-        OmniQL_Free:                   ['void',   ['pointer']],
-      });
-    }
+    if (fs.existsSync(p)) return p;
   }
   throw new Error(
     'OmniQL native library not found. ' +
-    'Build it with: go build -buildmode=c-shared -o libomniql.so ../../pkg/ffi',
+    'Please ensure libomniql.so/dylib/dll is present in the package or CWD.',
   );
 }
 
-const lib = loadLib();
+const lib = koffi.load(findLibPath());
+
+// Function definitions
+const OmniQL_NewEngine = lib.func('int OmniQL_NewEngine()');
+const OmniQL_FreeEngine = lib.func('void OmniQL_FreeEngine(int)');
+const OmniQL_Execute = lib.func('char *OmniQL_Execute(int, const char *)');
+const OmniQL_RegisterSchema = lib.func('char *OmniQL_RegisterSchema(int, const char *)');
+const OmniQL_Route = lib.func('char *OmniQL_Route(int, const char *, const char *)');
+const OmniQL_RegisterSQLiteDriver = lib.func('char *OmniQL_RegisterSQLiteDriver(int, const char *)');
+const OmniQL_RegisterPostgresDriver = lib.func('char *OmniQL_RegisterPostgresDriver(int, const char *)');
+const OmniQL_RegisterMongoDriver = lib.func('char *OmniQL_RegisterMongoDriver(int, const char *, const char *)');
+const OmniQL_Free = lib.func('void OmniQL_Free(void *)');
 
 // ---------------------------------------------------------------------------
 // OmniEngine class
 // ---------------------------------------------------------------------------
 
-/**
- * OmniEngine is the main entry-point for the OmniQL TypeScript binding.
- *
- * All `execute` calls are async and safe to use with `await`.
- */
 export class OmniEngine {
   private readonly handle: number;
 
   constructor() {
-    this.handle = lib.OmniQL_NewEngine();
+    this.handle = OmniQL_NewEngine();
+  }
+
+  /**
+   * Internal helper to call native functions that return a JSON string
+   * and need to be freed.
+   */
+  private callNative(fn: (...args: any[]) => any, ...args: any[]): string {
+    const raw = fn(this.handle, ...args);
+    if (!raw) return '{}';
+    try {
+      return koffi.decode(raw, 'char *') as string;
+    } finally {
+      OmniQL_Free(raw);
+    }
   }
 
   /**
@@ -148,8 +137,8 @@ export class OmniEngine {
 
     return new Promise((resolve, reject) => {
       try {
-        const raw: string = lib.OmniQL_Execute(this.handle, json);
-        resolve(JSON.parse(raw) as OmniResult<T>);
+        const rawResponse = this.callNative(OmniQL_Execute, json);
+        resolve(JSON.parse(rawResponse) as OmniResult<T>);
       } catch (err) {
         reject(err);
       }
@@ -160,53 +149,44 @@ export class OmniEngine {
    * Registers a collection schema with the engine.
    */
   registerSchema(schema: CollectionSchema): void {
-    lib.OmniQL_RegisterSchema(this.handle, JSON.stringify(schema));
+    this.callNative(OmniQL_RegisterSchema, JSON.stringify(schema));
   }
 
   /**
    * Binds a collection/table target name to a driver name.
-   * Must be called after registering a driver.
-   *
-   * @param target     The collection or table name.
-   * @param driverName The driver name returned by a registerXxxDriver call.
    */
   route(target: string, driverName: string): void {
-    lib.OmniQL_Route(this.handle, target, driverName);
+    this.callNative(OmniQL_Route, target, driverName);
   }
 
   /**
-   * Registers a SQLite driver using the given DSN (file path or ":memory:").
-   * Returns the driver name ("sqlite") to use with {@link route}.
+   * Registers a SQLite driver.
    */
   registerSQLiteDriver(dsn: string): string {
-    const raw: string = lib.OmniQL_RegisterSQLiteDriver(this.handle, dsn);
+    const raw: string = this.callNative(OmniQL_RegisterSQLiteDriver, dsn);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'sqlite';
   }
 
   /**
-   * Registers a PostgreSQL driver using the given connection string.
-   * e.g. "host=localhost user=pg password=pg dbname=mydb sslmode=disable"
-   * Returns the driver name ("postgres") to use with {@link route}.
+   * Registers a PostgreSQL driver.
    */
   registerPostgresDriver(connStr: string): string {
-    const raw: string = lib.OmniQL_RegisterPostgresDriver(this.handle, connStr);
+    const raw: string = this.callNative(OmniQL_RegisterPostgresDriver, connStr);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'postgres';
   }
 
   /**
-   * Registers a MongoDB driver using the given URI and database name.
-   * e.g. uri = "mongodb://localhost:27017", dbName = "mydb"
-   * Returns the driver name ("mongo") to use with {@link route}.
+   * Registers a MongoDB driver.
    */
   registerMongoDriver(uri: string, dbName: string): string {
-    const raw: string = lib.OmniQL_RegisterMongoDriver(this.handle, uri, dbName);
+    const raw: string = this.callNative(OmniQL_RegisterMongoDriver, uri, dbName);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'mongo';
   }
 
   /**
-   * Releases the native engine handle.  Call when done.
+   * Releases the native engine handle.
    */
   close(): void {
-    lib.OmniQL_FreeEngine(this.handle);
+    OmniQL_FreeEngine(this.handle);
   }
 }

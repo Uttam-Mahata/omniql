@@ -94,8 +94,6 @@ jobs:
           cp ../../core-artifacts/core-linux/libomniql.so dist/
           cp ../../core-artifacts/core-darwin/libomniql.dylib dist/
           cp ../../core-artifacts/core-windows/omniql.dll dist/
-        env:
-          CXXFLAGS: "-fpermissive"
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
