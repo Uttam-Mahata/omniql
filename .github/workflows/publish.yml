@@ -59,7 +59,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
+          cache: false
       - name: Build Shared Library
         run: |
           go build -buildmode=c-shared -o ${{ matrix.filename }} pkg/ffi/ffi.go
@@ -180,7 +181,8 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
           server-id: github
-          settings-path: ${{ github.workspace }}
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
