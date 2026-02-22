@@ -17,12 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.versioning.outputs.version }}
+      maven_version: ${{ steps.versioning.outputs.maven_version }}
     steps:
       - uses: actions/checkout@v4
       - id: versioning
         run: |
           # Extract base version from python manifest as source of truth
           BASE_VERSION=$(grep "^version =" bindings/python/pyproject.toml | cut -d '"' -f 2 | cut -d '-' -f 1)
+
+          # Python / npm / .NET versioning
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
           elif [[ $GITHUB_EVENT_NAME == pull_request ]]; then
@@ -34,8 +37,19 @@ jobs:
           else
             VERSION="$BASE_VERSION-dev.$GITHUB_RUN_NUMBER"
           fi
-          echo "Calculated Version: $VERSION"
+
+          # Maven versioning — SNAPSHOT for dev, RC for pre-release, release for tags
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            MAVEN_VERSION=${GITHUB_REF#refs/tags/v}
+          elif [[ $GITHUB_EVENT_NAME == pull_request && $GITHUB_BASE_REF == main ]]; then
+            MAVEN_VERSION="$BASE_VERSION-RC.$GITHUB_RUN_NUMBER"
+          else
+            MAVEN_VERSION="$BASE_VERSION-SNAPSHOT"
+          fi
+
+          echo "Version: $VERSION  |  Maven version: $MAVEN_VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
 
   build-core:
     name: Build Go Core Shared Library (${{ matrix.os }})
@@ -224,7 +238,7 @@ jobs:
           path: core-artifacts
       - name: Set Version
         run: |
-          mvn -f bindings/java/pom.xml versions:set -DnewVersion=${{ needs.get-version.outputs.version }} -DgenerateBackupPoms=false
+          mvn -f bindings/java/pom.xml versions:set -DnewVersion=${{ needs.get-version.outputs.maven_version }} -DgenerateBackupPoms=false
       - name: Prepare Native Libraries
         run: |
           mkdir -p bindings/java/src/main/resources/native
@@ -232,4 +246,4 @@ jobs:
           cp core-artifacts/core-darwin/libomniql.dylib bindings/java/src/main/resources/native/
           cp core-artifacts/core-windows/omniql.dll bindings/java/src/main/resources/native/
       - name: Publish to GitHub Packages
-        run: mvn -f bindings/java/pom.xml deploy -DskipTests --no-transfer-progress
+        run: mvn -f bindings/java/pom.xml deploy -DskipTests -e
