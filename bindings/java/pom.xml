@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.omniql</groupId>
+    <groupId>io.github.uttam-mahata</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.6.9</version>
+    <version>0.7.0</version>
     <name>OmniQL Java Binding</name>
     <description>A standardized, multi-database query language (OQL) for Java.</description>
     <url>https://github.com/Uttam-Mahata/omniql</url>
@@ -90,7 +90,7 @@
                         <extensions>true</extensions>
                         <configuration>
                             <serverId>ossrh</serverId>
-                            <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
+                            <nexusUrl>https://s01.oss.sonatype.org/service/local/</nexusUrl>
                             <autoReleaseAfterClose>true</autoReleaseAfterClose>
                         </configuration>
                     </plugin>
