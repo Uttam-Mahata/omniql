@@ -1,6 +1,6 @@
 # OmniQL — One Query Language, Every Database.
 
-> **Version:** v0.4.0
+> **Version:** v0.5.0
 > **Module:** `github.com/Uttam-Mahata/omniql`
 
 OmniQL is a unified data access layer that abstracts away the complexity of
@@ -50,7 +50,7 @@ handles its own query translation and execution.
 | Time-Series        | InfluxDB, TimescaleDB, QuestDB                           | Time-windowed aggregations                  |
 | Graph              | Neo4j, SurrealDB, Memgraph                               | Relationship / traversal queries            |
 
-**v0.4.0 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
+**v0.5.0 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
 
 ---
 
