@@ -1,55 +1,69 @@
 name: Publish to Registries
 
+# Trigger strategy:
+#   Nightly  — scheduled daily from dev branch
+#   Beta     — push tag v*-beta.*   (e.g. v0.9.0-beta.1)
+#   RC       — push tag v*-rc.*     (e.g. v0.9.0-rc.1)
+#   Stable   — push tag v*          (e.g. v0.9.0)
+#   Manual   — workflow_dispatch for on-demand nightly
 on:
+  schedule:
+    - cron: '0 2 * * *'   # Nightly at 02:00 UTC from default branch
   push:
-    branches:
-      - dev
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - dev
-      - main
+  workflow_dispatch:
 
 jobs:
   get-version:
     name: Calculate Version
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.versioning.outputs.version }}
+      version:       ${{ steps.versioning.outputs.version }}
       maven_version: ${{ steps.versioning.outputs.maven_version }}
+      npm_tag:       ${{ steps.versioning.outputs.npm_tag }}
+      release_type:  ${{ steps.versioning.outputs.release_type }}
     steps:
       - uses: actions/checkout@v4
       - id: versioning
         run: |
-          # Extract base version from python manifest as source of truth
           BASE_VERSION=$(grep "^version =" bindings/python/pyproject.toml | cut -d '"' -f 2 | cut -d '-' -f 1)
 
-          # Python / npm / .NET versioning
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ $GITHUB_EVENT_NAME == pull_request ]]; then
-            if [[ $GITHUB_BASE_REF == main ]]; then
-              VERSION="$BASE_VERSION-rc.$GITHUB_RUN_NUMBER"
+            TAG=${GITHUB_REF#refs/tags/v}
+            if [[ $TAG == *-beta.* ]]; then
+              VERSION=$TAG
+              MAVEN_VERSION=$TAG
+              RELEASE_TYPE="beta"
+              NPM_TAG="beta"
+            elif [[ $TAG == *-rc.* ]]; then
+              VERSION=$TAG
+              MAVEN_VERSION=$TAG
+              RELEASE_TYPE="rc"
+              NPM_TAG="next"
             else
-              VERSION="$BASE_VERSION-dev.$GITHUB_RUN_NUMBER"
+              VERSION=$TAG
+              MAVEN_VERSION=$TAG
+              RELEASE_TYPE="stable"
+              NPM_TAG="latest"
             fi
           else
-            VERSION="$BASE_VERSION-dev.$GITHUB_RUN_NUMBER"
-          fi
-
-          # Maven versioning — SNAPSHOT for dev, RC for pre-release, release for tags
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            MAVEN_VERSION=${GITHUB_REF#refs/tags/v}
-          elif [[ $GITHUB_EVENT_NAME == pull_request && $GITHUB_BASE_REF == main ]]; then
-            MAVEN_VERSION="$BASE_VERSION-RC.$GITHUB_RUN_NUMBER"
-          else
+            # Nightly (schedule or workflow_dispatch)
+            DATE=$(date +%Y%m%d)
+            VERSION="$BASE_VERSION-nightly.$DATE"
             MAVEN_VERSION="$BASE_VERSION-SNAPSHOT"
+            RELEASE_TYPE="nightly"
+            NPM_TAG="nightly"
           fi
 
-          echo "Version: $VERSION  |  Maven version: $MAVEN_VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release type : $RELEASE_TYPE"
+          echo "Version      : $VERSION"
+          echo "Maven version: $MAVEN_VERSION"
+          echo "npm tag      : $NPM_TAG"
+          echo "version=$VERSION"       >> $GITHUB_OUTPUT
           echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
+          echo "npm_tag=$NPM_TAG"       >> $GITHUB_OUTPUT
+          echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
 
   build-core:
     name: Build Go Core Shared Library (${{ matrix.os }})
@@ -148,7 +162,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd bindings/typescript
-          npm publish --access public
+          npm publish --access public --tag ${{ needs.get-version.outputs.npm_tag }}
 
   publish-nuget:
     name: Publish .NET Package to NuGet
