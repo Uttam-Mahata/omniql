@@ -1,6 +1,6 @@
 {
   "name": "omniql",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "description": "A standardized, multi-database query language (OQL) for TypeScript/Node.js.",
   "main": "dist/omniql.js",
   "types": "dist/omniql.d.ts",
