@@ -75,10 +75,7 @@ func OmniQL_Execute(handle C.int, queryJSON *C.char) *C.char {
 		return errorJSON("PARSE_ERROR", err.Error())
 	}
 
-	result, err := engine.Execute(context.Background(), query)
-	if err != nil {
-		return errorJSON("ENGINE_ERROR", err.Error())
-	}
+	result, _ := engine.Execute(context.Background(), query)
 
 	data, err := json.Marshal(result)
 	if err != nil {

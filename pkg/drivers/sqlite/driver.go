@@ -83,20 +83,11 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 	if len(query.Options.Fields) > 0 {
 		var cols []string
 		for field, val := range query.Options.Fields {
-			// Check for inclusion (1)
-			include := false
-			switch v := val.(type) {
-			case int:
-				if v == 1 {
-					include = true
-				}
-			case float64:
-				if v == 1 {
-					include = true
-				}
+			inc, err := fieldProjectionValue(val)
+			if err != nil {
+				return nil, 0, fmt.Errorf("sqlite: %w", err)
 			}
-
-			if include {
+			if inc {
 				cols = append(cols, quote(field))
 			}
 		}
@@ -234,6 +225,9 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 	if len(query.Document) == 0 {
 		return nil, 0, fmt.Errorf("sqlite: UPDATE requires a non-empty document")
 	}
+	if len(query.Filter) == 0 {
+		return nil, 0, fmt.Errorf("sqlite: UPDATE requires a non-empty filter to prevent accidental bulk updates")
+	}
 
 	setClauses := make([]string, 0, len(query.Document))
 	args := make([]interface{}, 0, len(query.Document))
@@ -262,6 +256,9 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 }
 
 func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
+	if len(query.Filter) == 0 {
+		return nil, 0, fmt.Errorf("sqlite: DELETE requires a non-empty filter to prevent accidental bulk deletes")
+	}
 	where, args, err := buildWhere(query.Filter)
 	if err != nil {
 		return nil, 0, err
@@ -424,4 +421,26 @@ func quote(ident string) string {
 func toSlice(v interface{}) ([]interface{}, bool) {
 	s, ok := v.([]interface{})
 	return s, ok
+}
+
+// fieldProjectionValue returns (true, nil) for inclusion (1), (false, nil) for
+// unknown values, and (false, error) when an exclusion value (0) is detected.
+// SQL drivers support inclusion-only projection.
+func fieldProjectionValue(val interface{}) (include bool, err error) {
+	var n float64
+	switch v := val.(type) {
+	case int:
+		n = float64(v)
+	case float64:
+		n = v
+	default:
+		return false, nil
+	}
+	if n == 1 {
+		return true, nil
+	}
+	if n == 0 {
+		return false, fmt.Errorf("field exclusion (value=0) is not supported; use inclusion (value=1) instead")
+	}
+	return false, nil
 }
