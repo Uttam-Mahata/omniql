@@ -11,9 +11,17 @@
 //   using OmniQL;
 //
 //   using var engine = new OmniEngine();
+//
+//   // 1. Register a driver (SQLite shown; use RegisterPostgresDriver or RegisterMongoDriver for others).
+//   string driverName = engine.RegisterSQLiteDriver(":memory:");
+//
+//   // 2. Route a collection target to the driver.
+//   engine.Route("users", driverName);
+//
+//   // 3. Execute a query using the fluent builder.
 //   var result = await engine
 //       .Table("users")
-//       .Find(new Filter { { "status", new { _eq = "active" } } })
+//       .Find(new Dictionary<string, object> { { "status", "active" } })
 //       .Limit(10)
 //       .ExecuteAsync();
 //
@@ -25,6 +33,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace OmniQL
@@ -49,6 +58,18 @@ namespace OmniQL
         [DllImport(LibName, EntryPoint = "OmniQL_RegisterSchema", CharSet = CharSet.Ansi)]
         internal static extern IntPtr RegisterSchema(int handle, string schemaJson);
 
+        [DllImport(LibName, EntryPoint = "OmniQL_Route", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr Route(int handle, string target, string driverName);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterSQLiteDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterSQLiteDriver(int handle, string dsn);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterPostgresDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterPostgresDriver(int handle, string connStr);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterMongoDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterMongoDriver(int handle, string uri, string dbName);
+
         [DllImport(LibName, EntryPoint = "OmniQL_Free")]
         internal static extern void Free(IntPtr ptr);
     }
@@ -59,38 +80,38 @@ namespace OmniQL
 
     public class OQLQuery
     {
-        public string Target   { get; set; } = string.Empty;
-        public string Action   { get; set; } = "FIND";
-        public Dictionary<string, object>? Filter   { get; set; }
-        public Dictionary<string, object>? Document { get; set; }
-        public OQLOptions Options { get; set; } = new();
+        [JsonPropertyName("target")]   public string Target   { get; set; } = string.Empty;
+        [JsonPropertyName("action")]   public string Action   { get; set; } = "FIND";
+        [JsonPropertyName("filter")]   public Dictionary<string, object>? Filter   { get; set; }
+        [JsonPropertyName("document")] public Dictionary<string, object>? Document { get; set; }
+        [JsonPropertyName("options")]  public OQLOptions Options { get; set; } = new();
     }
 
     public class OQLOptions
     {
-        public int Limit { get; set; }
-        public int Skip  { get; set; }
+        [JsonPropertyName("limit")] public int Limit { get; set; }
+        [JsonPropertyName("skip")]  public int Skip  { get; set; }
     }
 
     public class OmniResult
     {
-        public List<Dictionary<string, JsonElement>> Data { get; set; } = new();
-        public OmniMeta Meta  { get; set; } = new();
-        public OmniError? Error { get; set; }
+        [JsonPropertyName("data")]  public List<Dictionary<string, JsonElement>> Data { get; set; } = new();
+        [JsonPropertyName("meta")]  public OmniMeta Meta  { get; set; } = new();
+        [JsonPropertyName("error")] public OmniError? Error { get; set; }
     }
 
     public class OmniMeta
     {
-        public long   Total    { get; set; }
-        public int    Returned { get; set; }
-        public string Driver   { get; set; } = string.Empty;
-        public string Target   { get; set; } = string.Empty;
+        [JsonPropertyName("total")]    public long   Total    { get; set; }
+        [JsonPropertyName("returned")] public int    Returned { get; set; }
+        [JsonPropertyName("driver")]   public string Driver   { get; set; } = string.Empty;
+        [JsonPropertyName("target")]   public string Target   { get; set; } = string.Empty;
     }
 
     public class OmniError
     {
-        public string Code    { get; set; } = string.Empty;
-        public string Message { get; set; } = string.Empty;
+        [JsonPropertyName("code")]    public string Code    { get; set; } = string.Empty;
+        [JsonPropertyName("message")] public string Message { get; set; } = string.Empty;
     }
 
     // -------------------------------------------------------------------------
@@ -139,6 +160,65 @@ namespace OmniQL
             Native.Free(ptr);
         }
 
+        /// <summary>
+        /// Registers the SQLite driver using the given DSN (file path or ":memory:").
+        /// Returns the driver name ("sqlite") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterSQLiteDriver(string dsn)
+        {
+            IntPtr ptr = Native.RegisterSQLiteDriver(_handle, dsn);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "sqlite";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Registers the PostgreSQL driver using the given connection string
+        /// (e.g. "host=localhost user=pg password=pg dbname=mydb sslmode=disable").
+        /// Returns the driver name ("postgres") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterPostgresDriver(string connStr)
+        {
+            IntPtr ptr = Native.RegisterPostgresDriver(_handle, connStr);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "postgres";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Registers the MongoDB driver using the given URI and database name.
+        /// Returns the driver name ("mongo") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterMongoDriver(string uri, string dbName)
+        {
+            IntPtr ptr = Native.RegisterMongoDriver(_handle, uri, dbName);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "mongo";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Binds a collection/table <paramref name="target"/> name to a <paramref name="driverName"/>
+        /// so the engine routes queries for that target to the correct driver.
+        /// </summary>
+        public void Route(string target, string driverName)
+        {
+            IntPtr ptr = Native.Route(_handle, target, driverName);
+            Native.Free(ptr);
+        }
+
         /// <summary>Returns a fluent query builder for the given target.</summary>
         public QueryBuilder Table(string target) => new QueryBuilder(this, target);
 
@@ -179,6 +259,27 @@ namespace OmniQL
         {
             _query.Action   = "INSERT";
             _query.Document = document;
+            return this;
+        }
+
+        public QueryBuilder Update(Dictionary<string, object> document)
+        {
+            _query.Action   = "UPDATE";
+            _query.Document = document;
+            return this;
+        }
+
+        public QueryBuilder Delete(Dictionary<string, object> filter)
+        {
+            _query.Action = "DELETE";
+            _query.Filter = filter;
+            return this;
+        }
+
+        public QueryBuilder Count(Dictionary<string, object>? filter = null)
+        {
+            _query.Action = "COUNT";
+            _query.Filter = filter;
             return this;
         }
 

@@ -11,8 +11,14 @@
  *
  * Example usage:
  *   OmniEngine engine = OmniEngine.create();
+ *
+ *   // 1. Register a driver and route a target to it.
+ *   String driverName = engine.registerSQLiteDriver(":memory:");
+ *   engine.route("users", driverName);
+ *
+ *   // 2. Execute a query.
  *   OmniResult result = engine.table("users")
- *       .find(Filter.eq("status", "active"))
+ *       .find(Map.of("status", "active"))
  *       .limit(10)
  *       .execute();
  */
@@ -41,6 +47,10 @@ public class OmniEngine implements AutoCloseable {
     private static native void nativeFreeEngine(int handle);
     private static native String nativeExecute(int handle, String queryJson);
     private static native String nativeRegisterSchema(int handle, String schemaJson);
+    private static native String nativeRoute(int handle, String target, String driverName);
+    private static native String nativeRegisterSQLiteDriver(int handle, String dsn);
+    private static native String nativeRegisterPostgresDriver(int handle, String connStr);
+    private static native String nativeRegisterMongoDriver(int handle, String uri, String dbName);
 
     // -------------------------------------------------------------------------
     // Java API
@@ -85,6 +95,67 @@ public class OmniEngine implements AutoCloseable {
         return new QueryBuilder(this, target);
     }
 
+    /**
+     * Binds a collection/table target to a specific driver name.
+     * Must be called after registering a driver.
+     *
+     * @param target     the collection or table name
+     * @param driverName the driver name returned by a register*Driver call
+     */
+    public void route(String target, String driverName) {
+        nativeRoute(handle, target, driverName);
+    }
+
+    /**
+     * Registers a SQLite driver using the given DSN (file path or ":memory:").
+     *
+     * @param dsn the SQLite file path or ":memory:"
+     * @return the driver name ("sqlite") to use with {@link #route}
+     */
+    public String registerSQLiteDriver(String dsn) {
+        String json = nativeRegisterSQLiteDriver(handle, dsn);
+        return extractDriverName(json, "sqlite");
+    }
+
+    /**
+     * Registers a PostgreSQL driver using the given connection string.
+     * e.g. "host=localhost user=pg password=pg dbname=mydb sslmode=disable"
+     *
+     * @param connStr the Postgres connection string
+     * @return the driver name ("postgres") to use with {@link #route}
+     */
+    public String registerPostgresDriver(String connStr) {
+        String json = nativeRegisterPostgresDriver(handle, connStr);
+        return extractDriverName(json, "postgres");
+    }
+
+    /**
+     * Registers a MongoDB driver using the given URI and database name.
+     * e.g. uri = "mongodb://localhost:27017", dbName = "mydb"
+     *
+     * @param uri    the MongoDB connection URI
+     * @param dbName the database name to use
+     * @return the driver name ("mongo") to use with {@link #route}
+     */
+    public String registerMongoDriver(String uri, String dbName) {
+        String json = nativeRegisterMongoDriver(handle, uri, dbName);
+        return extractDriverName(json, "mongo");
+    }
+
+    private String extractDriverName(String json, String fallback) {
+        // Simple extraction without a full JSON parse dependency.
+        // json is of the form {"driver":"sqlite"} or a JSON error.
+        if (json != null && json.contains("\"driver\"")) {
+            int start = json.indexOf("\"driver\"") + 9; // skip "driver":
+            start = json.indexOf('"', start) + 1;
+            int end = json.indexOf('"', start);
+            if (start > 0 && end > start) {
+                return json.substring(start, end);
+            }
+        }
+        return fallback;
+    }
+
     @Override
     public void close() {
         nativeFreeEngine(handle);
@@ -110,6 +181,30 @@ public class OmniEngine implements AutoCloseable {
 
         public QueryBuilder find(Map<String, Object> filter) {
             this.query.action = "FIND";
+            this.query.filter = filter;
+            return this;
+        }
+
+        public QueryBuilder insert(Map<String, Object> document) {
+            this.query.action   = "INSERT";
+            this.query.document = document;
+            return this;
+        }
+
+        public QueryBuilder update(Map<String, Object> document) {
+            this.query.action   = "UPDATE";
+            this.query.document = document;
+            return this;
+        }
+
+        public QueryBuilder delete(Map<String, Object> filter) {
+            this.query.action = "DELETE";
+            this.query.filter = filter;
+            return this;
+        }
+
+        public QueryBuilder count(Map<String, Object> filter) {
+            this.query.action = "COUNT";
             this.query.filter = filter;
             return this;
         }
