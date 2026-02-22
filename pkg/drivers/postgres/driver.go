@@ -314,27 +314,27 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, er
 			for op, val := range c {
 				switch op {
 				case "$eq":
-					clauses = append(clauses, fmt.Sprintf("%s = $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$ne":
-					clauses = append(clauses, fmt.Sprintf("%s != $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s != $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$lt":
-					clauses = append(clauses, fmt.Sprintf("%s < $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s < $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$lte":
-					clauses = append(clauses, fmt.Sprintf("%s <= $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s <= $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$gt":
-					clauses = append(clauses, fmt.Sprintf("%s > $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s > $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$gte":
-					clauses = append(clauses, fmt.Sprintf("%s >= $%d", quote(field), i))
+					clauses = append(clauses, fmt.Sprintf("%s >= $%d", translateColumn(field), i))
 					args = append(args, val)
 					i++
 				case "$in":
@@ -348,7 +348,7 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, er
 							args = append(args, v)
 							i++
 						}
-						clauses = append(clauses, fmt.Sprintf("%s IN (%s)", quote(field), strings.Join(placeholders, ", ")))
+						clauses = append(clauses, fmt.Sprintf("%s IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
 					} else {
 						return "", nil, fmt.Errorf("postgres: $in requires a slice")
 					}
@@ -363,7 +363,7 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, er
 							args = append(args, v)
 							i++
 						}
-						clauses = append(clauses, fmt.Sprintf("%s NOT IN (%s)", quote(field), strings.Join(placeholders, ", ")))
+						clauses = append(clauses, fmt.Sprintf("%s NOT IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
 					} else {
 						return "", nil, fmt.Errorf("postgres: $nin requires a slice")
 					}
@@ -373,7 +373,7 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, er
 			}
 		default:
 			// Bare value: treat as equality.
-			clauses = append(clauses, fmt.Sprintf("%s = $%d", quote(field), i))
+			clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
 			args = append(args, constraint)
 			i++
 		}
@@ -415,6 +415,35 @@ func scanRows(rows *sql.Rows, total int64) ([]map[string]interface{}, int64, err
 // handle reserved keywords.
 func quote(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
+
+// translateColumn converts a dot-notated field (e.g. "profile.name") into
+// a PostgreSQL JSON path expression (e.g. "profile"->>'name').
+// If the field has no dots, it is simply quoted.
+func translateColumn(field string) string {
+	parts := strings.Split(field, ".")
+	if len(parts) == 1 {
+		return quote(field)
+	}
+
+	// Start with the column name
+	expr := quote(parts[0])
+
+	// Iterate over path segments.
+	// Use -> for intermediate steps (returns jsonb)
+	// Use ->> for the final step (returns text)
+	for i, part := range parts[1:] {
+		// Use single quotes for JSON keys
+		key := strings.ReplaceAll(part, "'", "''")
+		if i == len(parts)-2 {
+			// Last part: ->>
+			expr = fmt.Sprintf("%s->>'%s'", expr, key)
+		} else {
+			// Intermediate part: ->
+			expr = fmt.Sprintf("%s->'%s'", expr, key)
+		}
+	}
+	return expr
 }
 
 // toSlice converts an interface{} to []interface{} if possible.

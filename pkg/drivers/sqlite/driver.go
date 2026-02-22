@@ -325,22 +325,22 @@ func buildWhere(filter core.Filter) (string, []interface{}, error) {
 			for op, val := range c {
 				switch op {
 				case "$eq":
-					clauses = append(clauses, quote(field)+" = ?")
+					clauses = append(clauses, translateColumn(field)+" = ?")
 					args = append(args, val)
 				case "$ne":
-					clauses = append(clauses, quote(field)+" != ?")
+					clauses = append(clauses, translateColumn(field)+" != ?")
 					args = append(args, val)
 				case "$lt":
-					clauses = append(clauses, quote(field)+" < ?")
+					clauses = append(clauses, translateColumn(field)+" < ?")
 					args = append(args, val)
 				case "$lte":
-					clauses = append(clauses, quote(field)+" <= ?")
+					clauses = append(clauses, translateColumn(field)+" <= ?")
 					args = append(args, val)
 				case "$gt":
-					clauses = append(clauses, quote(field)+" > ?")
+					clauses = append(clauses, translateColumn(field)+" > ?")
 					args = append(args, val)
 				case "$gte":
-					clauses = append(clauses, quote(field)+" >= ?")
+					clauses = append(clauses, translateColumn(field)+" >= ?")
 					args = append(args, val)
 				case "$in":
 					if vals, ok := toSlice(val); ok {
@@ -352,7 +352,7 @@ func buildWhere(filter core.Filter) (string, []interface{}, error) {
 							placeholders[i] = "?"
 							args = append(args, v)
 						}
-						clauses = append(clauses, quote(field)+" IN ("+strings.Join(placeholders, ", ")+")")
+						clauses = append(clauses, translateColumn(field)+" IN ("+strings.Join(placeholders, ", ")+")")
 					} else {
 						return "", nil, fmt.Errorf("sqlite: $in requires a slice")
 					}
@@ -366,7 +366,7 @@ func buildWhere(filter core.Filter) (string, []interface{}, error) {
 							placeholders[i] = "?"
 							args = append(args, v)
 						}
-						clauses = append(clauses, quote(field)+" NOT IN ("+strings.Join(placeholders, ", ")+")")
+						clauses = append(clauses, translateColumn(field)+" NOT IN ("+strings.Join(placeholders, ", ")+")")
 					} else {
 						return "", nil, fmt.Errorf("sqlite: $nin requires a slice")
 					}
@@ -375,7 +375,7 @@ func buildWhere(filter core.Filter) (string, []interface{}, error) {
 				}
 			}
 		default:
-			clauses = append(clauses, quote(field)+" = ?")
+			clauses = append(clauses, translateColumn(field)+" = ?")
 			args = append(args, constraint)
 		}
 	}
@@ -415,6 +415,25 @@ func scanRows(rows *sql.Rows, total int64) ([]map[string]interface{}, int64, err
 // quote wraps an identifier in double-quotes.
 func quote(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
+
+// translateColumn converts a dot-notated field (e.g. "profile.name") into
+// a SQLite JSON path expression (e.g. json_extract("profile", '$.name')).
+// If the field has no dots, it is simply quoted.
+func translateColumn(field string) string {
+	parts := strings.Split(field, ".")
+	if len(parts) == 1 {
+		return quote(field)
+	}
+
+	// First part is the column name
+	col := quote(parts[0])
+
+	// Rest is the JSON path
+	path := "$." + strings.Join(parts[1:], ".")
+	path = strings.ReplaceAll(path, "'", "''")
+
+	return fmt.Sprintf("json_extract(%s, '%s')", col, path)
 }
 
 // toSlice converts interface{} to []interface{} if possible.
