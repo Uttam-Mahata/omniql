@@ -180,9 +180,23 @@ jobs:
         with:
           java-version: '11'
           distribution: 'temurin'
-          server-id: github
-          server-username: GITHUB_ACTOR
-          server-password: GITHUB_TOKEN
+      - name: Configure Maven Settings
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'EOF'
+          <settings>
+            <servers>
+              <server>
+                <id>github</id>
+                <username>${env.GITHUB_ACTOR}</username>
+                <password>${env.GITHUB_TOKEN}</password>
+                <configuration>
+                  <preemptiveAuthentication>true</preemptiveAuthentication>
+                </configuration>
+              </server>
+            </servers>
+          </settings>
+          EOF
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -197,6 +211,7 @@ jobs:
           cp core-artifacts/core-darwin/libomniql.dylib bindings/java/src/main/resources/native/
           cp core-artifacts/core-windows/omniql.dll bindings/java/src/main/resources/native/
       - name: Publish to GitHub Packages
-        run: mvn -f bindings/java/pom.xml deploy -DskipTests
+        run: mvn -f bindings/java/pom.xml deploy -DskipTests --no-transfer-progress
         env:
+          GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN }}
