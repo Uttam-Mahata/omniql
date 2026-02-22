@@ -6,7 +6,7 @@
 
     <groupId>io.omniql</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.5.9</version>
+    <version>0.6.0</version>
     <name>OmniQL Java Binding</name>
     <description>A standardized, multi-database query language (OQL) for Java.</description>
     <url>https://github.com/Uttam-Mahata/omniql</url>
@@ -20,10 +20,10 @@
     </licenses>
 
     <developers>
-        <author>
+        <developer>
             <name>Uttam Mahata</name>
             <email>uttam-mahata-cs@outlook.com</email>
-        </author>
+        </developer>
     </developers>
 
     <scm>
