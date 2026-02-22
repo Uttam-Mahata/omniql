@@ -51,7 +51,7 @@ jobs:
             # Nightly (schedule or workflow_dispatch)
             DATE=$(date +%Y%m%d)
             VERSION="$BASE_VERSION-nightly.$DATE"
-            MAVEN_VERSION="$BASE_VERSION-SNAPSHOT"
+            MAVEN_VERSION=""   # Maven not published on nightly (GitHub Packages rejects SNAPSHOT PUT)
             RELEASE_TYPE="nightly"
             NPM_TAG="nightly"
           fi
@@ -196,6 +196,9 @@ jobs:
 
   publish-maven:
     name: Publish Java Package to GitHub Packages
+    # GitHub Packages Maven registry does not support SNAPSHOT (timestamped) PUT paths.
+    # Only publish on tags (beta / rc / stable).
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-core, get-version]
     runs-on: ubuntu-latest
     permissions:

@@ -71,6 +71,49 @@ Thin wrapper: parses `-driver`, `-dsn`, `-db`, `-query` flags → instantiates t
 
 Each binding (`java/`, `python/`, `csharp/`, `typescript/`) loads `libomniql.so` at runtime and wraps the C ABI. They all follow the same three-step pattern: register driver → route target → execute query. The bindings are standalone files and do not form part of the Go module.
 
+## CI/CD & Release Strategy
+
+Releases are tag-driven. **Do not push to `dev` to publish packages** — the publish workflow only runs on tags and the nightly schedule.
+
+### Release types & tag conventions
+
+| Release type | Tag format | Example |
+|---|---|---|
+| Stable | `v<major>.<minor>.<patch>` | `v0.9.0` |
+| Release Candidate | `v<version>-rc.<n>` | `v0.9.0-rc.1` |
+| Beta | `v<version>-beta.<n>` | `v0.9.0-beta.1` |
+| Nightly | *(scheduled — no tag needed)* | runs daily at 02:00 UTC |
+
+### Cutting a release
+
+```bash
+# Beta
+git tag v0.9.0-beta.1 && git push origin v0.9.0-beta.1
+
+# Release candidate
+git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1
+
+# Stable
+git tag v0.9.0 && git push origin v0.9.0
+```
+
+### Version matrix per ecosystem
+
+| Type | Python / NuGet / Maven JAR | npm dist-tag | Maven |
+|---|---|---|---|
+| nightly | `0.9.0-nightly.YYYYMMDD` | `nightly` | `0.9.0-SNAPSHOT` |
+| beta | `0.9.0-beta.1` | `beta` | `0.9.0-beta.1` |
+| rc | `0.9.0-rc.1` | `next` | `0.9.0-rc.1` |
+| stable | `0.9.0` | `latest` | `0.9.0` |
+
+The base version (`0.9.0`) is the source of truth in `bindings/python/pyproject.toml`. Update it there before tagging.
+
+### Workflow file
+
+`.github/workflows/publish.yml` — builds the Go shared library for Linux/macOS/Windows, then publishes to PyPI, npm, NuGet, and GitHub Packages (Maven) in parallel.
+
+---
+
 ## Implementing a new driver
 
 1. Create `pkg/drivers/<name>/driver.go` with `package <name>`.
