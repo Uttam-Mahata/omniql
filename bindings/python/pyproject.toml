@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omniql"
-version = "0.5.1"
+version = "0.5.2"
 description = "A standardized, multi-database query language (OQL) for Python."
 readme = "README.md"
 requires-python = ">=3.8"
