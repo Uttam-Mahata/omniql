@@ -1,6 +1,6 @@
 {
   "name": "omniql",
-  "version": "0.5.4",
+  "version": "0.5.6",
   "description": "A standardized, multi-database query language (OQL) for TypeScript/Node.js.",
   "main": "dist/omniql.js",
   "types": "dist/omniql.d.ts",
@@ -13,10 +13,12 @@
   "author": "Uttam Mahata <uttam-mahata-cs@outlook.com>",
   "license": "Apache-2.0",
   "dependencies": {
-    "koffi": "^2.9.0"
+    "bindings": "^1.5.0",
+    "node-addon-api": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "node-gyp": "^10.0.0",
     "typescript": "^5.0.0"
   },
   "scripts": {

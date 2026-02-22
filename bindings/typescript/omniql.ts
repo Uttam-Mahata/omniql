@@ -2,25 +2,15 @@
  * OmniQL TypeScript / Node.js Binding
  * =====================================
  *
- * A modern, low-friction Node.js binding built with Koffi that wraps the
- * OmniQL shared library.
- *
- * Example usage:
- *   import { OmniEngine } from 'omniql';
- *
- *   const engine = new OmniEngine();
- *   const driver = engine.registerSQLiteDriver(':memory:');
- *   engine.route('data', driver);
- *   const result = await engine.execute({ target: 'data', action: 'FIND' });
- *   engine.close();
+ * A robust Node.js binding built with a native C++ addon to handle signal
+ * masking and FFI stability.
  */
 
-import * as koffi from 'koffi';
 import * as path from 'path';
 import * as fs from 'fs';
 
 // ---------------------------------------------------------------------------
-// TypeScript types
+// TypeScript types (same as before)
 // ---------------------------------------------------------------------------
 
 export type Action = 'FIND' | 'INSERT' | 'UPDATE' | 'DELETE' | 'COUNT';
@@ -71,6 +61,9 @@ export interface CollectionSchema {
 // Native library loader
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const bridge = require('bindings')('omniql_bridge');
+
 const LIB_SEARCH_PATHS = [
   path.join(__dirname, 'libomniql.so'),
   path.join(__dirname, 'libomniql.dylib'),
@@ -78,30 +71,20 @@ const LIB_SEARCH_PATHS = [
   path.join(process.cwd(), 'libomniql.so'),
   path.join(process.cwd(), 'libomniql.dylib'),
   path.join(process.cwd(), 'omniql.dll'),
+  './libomniql.so',
+  'libomniql.so',
 ];
 
 function findLibPath(): string {
   for (const p of LIB_SEARCH_PATHS) {
     if (fs.existsSync(p)) return p;
   }
-  throw new Error(
-    'OmniQL native library not found. ' +
-    'Please ensure libomniql.so/dylib/dll is present in the package or CWD.',
-  );
+  throw new Error('OmniQL native library not found. Please ensure libomniql.so/dylib/dll is present.');
 }
 
-const lib = koffi.load(findLibPath());
-
-// Function definitions
-const OmniQL_NewEngine = lib.func('int OmniQL_NewEngine()');
-const OmniQL_FreeEngine = lib.func('void OmniQL_FreeEngine(int)');
-const OmniQL_Execute = lib.func('void *OmniQL_Execute(int, const char *)');
-const OmniQL_RegisterSchema = lib.func('void *OmniQL_RegisterSchema(int, const char *)');
-const OmniQL_Route = lib.func('void *OmniQL_Route(int, const char *, const char *)');
-const OmniQL_RegisterSQLiteDriver = lib.func('void *OmniQL_RegisterSQLiteDriver(int, const char *)');
-const OmniQL_RegisterPostgresDriver = lib.func('void *OmniQL_RegisterPostgresDriver(int, const char *)');
-const OmniQL_RegisterMongoDriver = lib.func('void *OmniQL_RegisterMongoDriver(int, const char *, const char *)');
-const OmniQL_Free = lib.func('void OmniQL_Free(void *)');
+// Initialize the bridge by loading the shared library.
+// The C++ bridge handles SIGURG masking internally.
+bridge.loadLib(findLibPath());
 
 // ---------------------------------------------------------------------------
 // OmniEngine class
@@ -111,82 +94,40 @@ export class OmniEngine {
   private readonly handle: number;
 
   constructor() {
-    this.handle = OmniQL_NewEngine();
+    this.handle = bridge.newEngine();
   }
 
-  /**
-   * Internal helper to call native functions that return a JSON string
-   * and need to be freed.
-   */
-  private callNative(fn: (...args: any[]) => any, ...args: any[]): string {
-    const raw = fn(this.handle, ...args);
-    if (!raw || koffi.address(raw) === 0n) return '{}';
-    try {
-      return koffi.decode(raw, 'char *') as string;
-    } finally {
-      OmniQL_Free(raw);
-    }
-  }
-
-  /**
-   * Executes an OQL query and returns the OmniJSON result.
-   */
   async execute<T = Record<string, unknown>>(query: Query): Promise<OmniResult<T>> {
     const queryWithDefaults: Query = { action: 'FIND', ...query };
     const json = JSON.stringify(queryWithDefaults);
-
-    return new Promise((resolve, reject) => {
-      try {
-        const rawResponse = this.callNative(OmniQL_Execute, json);
-        resolve(JSON.parse(rawResponse) as OmniResult<T>);
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const rawResponse = bridge.execute(this.handle, json);
+    return JSON.parse(rawResponse) as OmniResult<T>;
   }
 
-  /**
-   * Registers a collection schema with the engine.
-   */
   registerSchema(schema: CollectionSchema): void {
-    this.callNative(OmniQL_RegisterSchema, JSON.stringify(schema));
+    bridge.registerSchema(this.handle, JSON.stringify(schema));
   }
 
-  /**
-   * Binds a collection/table target name to a driver name.
-   */
   route(target: string, driverName: string): void {
-    this.callNative(OmniQL_Route, target, driverName);
+    bridge.route(this.handle, target, driverName);
   }
 
-  /**
-   * Registers a SQLite driver.
-   */
   registerSQLiteDriver(dsn: string): string {
-    const raw: string = this.callNative(OmniQL_RegisterSQLiteDriver, dsn);
+    const raw: string = bridge.registerSQLiteDriver(this.handle, dsn);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'sqlite';
   }
 
-  /**
-   * Registers a PostgreSQL driver.
-   */
   registerPostgresDriver(connStr: string): string {
-    const raw: string = this.callNative(OmniQL_RegisterPostgresDriver, connStr);
+    const raw: string = bridge.registerPostgresDriver(this.handle, connStr);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'postgres';
   }
 
-  /**
-   * Registers a MongoDB driver.
-   */
   registerMongoDriver(uri: string, dbName: string): string {
-    const raw: string = this.callNative(OmniQL_RegisterMongoDriver, uri, dbName);
+    const raw: string = bridge.registerMongoDriver(this.handle, uri, dbName);
     return (JSON.parse(raw) as { driver: string }).driver ?? 'mongo';
   }
 
-  /**
-   * Releases the native engine handle.
-   */
   close(): void {
-    OmniQL_FreeEngine(this.handle);
+    bridge.freeEngine(this.handle);
   }
 }
