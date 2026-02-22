@@ -127,8 +127,12 @@ jobs:
           cp core-artifacts/core-darwin/libomniql.dylib bindings/java/src/main/resources/native/
           cp core-artifacts/core-windows/omniql.dll bindings/java/src/main/resources/native/
           cd bindings/java
-          # Note: This requires signing and a staging repo on OSSRH.
-          mvn clean deploy -P release -DskipTests -Dgpg.passphrase=${{ secrets.MAVEN_GPG_PASSPHRASE }} --batch-mode
+          # Use system properties to pass credentials directly to the staging plugin
+          mvn clean deploy -P release -DskipTests \
+            -Dgpg.passphrase=${{ secrets.MAVEN_GPG_PASSPHRASE }} \
+            -Dnexus.username=${{ secrets.OSSRH_USERNAME }} \
+            -Dnexus.password=${{ secrets.OSSRH_TOKEN }} \
+            --batch-mode
 
   publish-nuget:
     name: Publish .NET Package to NuGet
