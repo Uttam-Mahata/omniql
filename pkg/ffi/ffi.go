@@ -5,7 +5,7 @@
 // Build as a shared library with:
 //
 //	go build -buildmode=c-shared -o libomniql.so ./pkg/ffi
-package ffi
+package main
 
 /*
 #include <stdlib.h>
@@ -13,11 +13,19 @@ package ffi
 import "C"
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"unsafe"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	drvmongo "github.com/Uttam-Mahata/omniql/pkg/drivers/mongo"
+	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
+	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
+	_ "github.com/lib/pq"                         // Postgres database/sql driver
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // engineRegistry holds Engine instances keyed by an opaque integer handle so
@@ -106,6 +114,93 @@ func OmniQL_RegisterSchema(handle C.int, schemaJSON *C.char) *C.char {
 	}
 	engine.RegisterSchema(schema)
 	return C.CString("")
+}
+
+// OmniQL_Route binds a collection/table target name to a driver name within
+// the engine identified by handle.  Call this after registering a driver so
+// the engine knows which driver to use for each target.
+//
+// Returns an empty C string on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_Route
+func OmniQL_Route(handle C.int, target *C.char, driverName *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	engine.Route(C.GoString(target), C.GoString(driverName))
+	return C.CString("")
+}
+
+// OmniQL_RegisterSQLiteDriver creates a SQLite driver using the given DSN
+// (file path or ":memory:"), registers it with the engine, and returns its
+// driver name ("sqlite") in a JSON string so the caller can use it with
+// OmniQL_Route.
+//
+// Returns JSON {"driver":"sqlite"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterSQLiteDriver
+func OmniQL_RegisterSQLiteDriver(handle C.int, dsn *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	drv, err := drvsqlite.New(C.GoString(dsn))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("sqlite: %v", err))
+	}
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterPostgresDriver opens a Postgres connection using the
+// provided connection string (e.g. "postgres://user:pass@host/db?sslmode=disable"),
+// wraps it in the OmniQL Postgres driver, registers it with the engine, and
+// returns {"driver":"postgres"} on success.
+//
+// Returns JSON {"driver":"postgres"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterPostgresDriver
+func OmniQL_RegisterPostgresDriver(handle C.int, connStr *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	db, err := sql.Open("postgres", C.GoString(connStr))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("postgres open: %v", err))
+	}
+	drv := drvpostgres.New(db)
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterMongoDriver connects to MongoDB using the provided URI
+// (e.g. "mongodb://localhost:27017"), selects the given database name,
+// registers the driver with the engine, and returns {"driver":"mongo"} on success.
+//
+// Returns JSON {"driver":"mongo"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterMongoDriver
+func OmniQL_RegisterMongoDriver(handle C.int, uri *C.char, dbName *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(C.GoString(uri)))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("mongo connect: %v", err))
+	}
+	drv := drvmongo.New(client, C.GoString(dbName))
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
 }
 
 // getEngine retrieves the engine by handle (thread-safe).

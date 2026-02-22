@@ -16,10 +16,16 @@ Then install the Python package::
 Example usage::
 
     import asyncio
-    from omniql import OmniEngine, Query, Filter
+    from omniql import OmniEngine, Query
 
     async def main():
         engine = OmniEngine()
+
+        # 1. Register a driver and bind a target to it.
+        driver_name = await engine.register_sqlite_driver(":memory:")
+        await engine.route("analytics_data", driver_name)
+
+        # 2. Execute a query.
         result = await engine.execute(
             Query(
                 target="analytics_data",
@@ -58,6 +64,10 @@ _ffi.cdef(
     void   OmniQL_FreeEngine(int handle);
     char * OmniQL_Execute(int handle, const char *queryJson);
     char * OmniQL_RegisterSchema(int handle, const char *schemaJson);
+    char * OmniQL_Route(int handle, const char *target, const char *driverName);
+    char * OmniQL_RegisterSQLiteDriver(int handle, const char *dsn);
+    char * OmniQL_RegisterPostgresDriver(int handle, const char *connStr);
+    char * OmniQL_RegisterMongoDriver(int handle, const char *uri, const char *dbName);
     void   OmniQL_Free(char *ptr);
 """
 )
@@ -182,16 +192,78 @@ class OmniEngine:
             raw = _lib.OmniQL_RegisterSchema(self._handle, schema_json)
         _lib.OmniQL_Free(raw)
 
+    def route_sync(self, target: str, driver_name: str) -> None:
+        """Bind a target collection/table to a driver name synchronously."""
+        with self._lock:
+            raw = _lib.OmniQL_Route(self._handle, target.encode(), driver_name.encode())
+        _lib.OmniQL_Free(raw)
+
+    def register_sqlite_driver_sync(self, dsn: str) -> str:
+        """Register a SQLite driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterSQLiteDriver(self._handle, dsn.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "sqlite")
+        finally:
+            _lib.OmniQL_Free(raw)
+
+    def register_postgres_driver_sync(self, conn_str: str) -> str:
+        """Register a PostgreSQL driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterPostgresDriver(self._handle, conn_str.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "postgres")
+        finally:
+            _lib.OmniQL_Free(raw)
+
+    def register_mongo_driver_sync(self, uri: str, db_name: str) -> str:
+        """Register a MongoDB driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterMongoDriver(self._handle, uri.encode(), db_name.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "mongo")
+        finally:
+            _lib.OmniQL_Free(raw)
+
     # ------------------------------------------------------------------
     # Asyncio API
     # ------------------------------------------------------------------
 
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.get_event_loop()
+
     async def execute(self, query: Query) -> OmniResult:
         """Execute a query asynchronously (runs in a thread-pool executor)."""
-        loop = asyncio.get_event_loop()
+        loop = self._get_loop()
         return await loop.run_in_executor(None, self.execute_sync, query)
 
     async def register_schema(self, schema: dict) -> None:
         """Register a schema asynchronously."""
-        loop = asyncio.get_event_loop()
+        loop = self._get_loop()
         await loop.run_in_executor(None, self.register_schema_sync, schema)
+
+    async def route(self, target: str, driver_name: str) -> None:
+        """Bind a target collection/table to a driver name asynchronously."""
+        loop = self._get_loop()
+        await loop.run_in_executor(None, self.route_sync, target, driver_name)
+
+    async def register_sqlite_driver(self, dsn: str) -> str:
+        """Register a SQLite driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_sqlite_driver_sync, dsn)
+
+    async def register_postgres_driver(self, conn_str: str) -> str:
+        """Register a PostgreSQL driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_postgres_driver_sync, conn_str)
+
+    async def register_mongo_driver(self, uri: str, db_name: str) -> str:
+        """Register a MongoDB driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_mongo_driver_sync, uri, db_name)

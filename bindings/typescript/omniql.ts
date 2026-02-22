@@ -16,6 +16,11 @@
  *
  *   const engine = new OmniEngine();
  *
+ *   // 1. Register a driver and route a target to it.
+ *   const driverName = engine.registerSQLiteDriver(':memory:');
+ *   engine.route('analytics_data', driverName);
+ *
+ *   // 2. Execute a query.
  *   const result = await engine.execute({
  *     target: 'analytics_data',
  *     action: 'FIND',
@@ -97,11 +102,15 @@ function loadLib(): ReturnType<typeof ffi.Library> {
   for (const p of LIB_SEARCH_PATHS) {
     if (fs.existsSync(p)) {
       return ffi.Library(p, {
-        OmniQL_NewEngine:      ['int',    []],
-        OmniQL_FreeEngine:     ['void',   ['int']],
-        OmniQL_Execute:        ['string', ['int', 'string']],
-        OmniQL_RegisterSchema: ['string', ['int', 'string']],
-        OmniQL_Free:           ['void',   ['pointer']],
+        OmniQL_NewEngine:              ['int',    []],
+        OmniQL_FreeEngine:             ['void',   ['int']],
+        OmniQL_Execute:                ['string', ['int', 'string']],
+        OmniQL_RegisterSchema:         ['string', ['int', 'string']],
+        OmniQL_Route:                  ['string', ['int', 'string', 'string']],
+        OmniQL_RegisterSQLiteDriver:   ['string', ['int', 'string']],
+        OmniQL_RegisterPostgresDriver: ['string', ['int', 'string']],
+        OmniQL_RegisterMongoDriver:    ['string', ['int', 'string', 'string']],
+        OmniQL_Free:                   ['void',   ['pointer']],
       });
     }
   }
@@ -151,6 +160,46 @@ export class OmniEngine {
    */
   registerSchema(schema: CollectionSchema): void {
     lib.OmniQL_RegisterSchema(this.handle, JSON.stringify(schema));
+  }
+
+  /**
+   * Binds a collection/table target name to a driver name.
+   * Must be called after registering a driver.
+   *
+   * @param target     The collection or table name.
+   * @param driverName The driver name returned by a registerXxxDriver call.
+   */
+  route(target: string, driverName: string): void {
+    lib.OmniQL_Route(this.handle, target, driverName);
+  }
+
+  /**
+   * Registers a SQLite driver using the given DSN (file path or ":memory:").
+   * Returns the driver name ("sqlite") to use with {@link route}.
+   */
+  registerSQLiteDriver(dsn: string): string {
+    const raw: string = lib.OmniQL_RegisterSQLiteDriver(this.handle, dsn);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'sqlite';
+  }
+
+  /**
+   * Registers a PostgreSQL driver using the given connection string.
+   * e.g. "host=localhost user=pg password=pg dbname=mydb sslmode=disable"
+   * Returns the driver name ("postgres") to use with {@link route}.
+   */
+  registerPostgresDriver(connStr: string): string {
+    const raw: string = lib.OmniQL_RegisterPostgresDriver(this.handle, connStr);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'postgres';
+  }
+
+  /**
+   * Registers a MongoDB driver using the given URI and database name.
+   * e.g. uri = "mongodb://localhost:27017", dbName = "mydb"
+   * Returns the driver name ("mongo") to use with {@link route}.
+   */
+  registerMongoDriver(uri: string, dbName: string): string {
+    const raw: string = lib.OmniQL_RegisterMongoDriver(this.handle, uri, dbName);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'mongo';
   }
 
   /**

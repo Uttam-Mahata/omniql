@@ -27,7 +27,11 @@ go.work.sum
 # env file
 .env
 
-# Editor/IDE
+# Generated C header from c-shared build
+*.h
+
+# Editor/IDE and tool directories
+.gemini/
 # .idea/
 # .vscode/
 omniql
