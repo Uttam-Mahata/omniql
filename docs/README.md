@@ -6,6 +6,7 @@ Version-specific documentation for OmniQL.
 |---------|------------|
 | [v0.2.0](v0.2.0/README.md) | Initial release — core engine, SQLite/Postgres/Mongo drivers, FFI layer, language bindings (no driver registration API) |
 | [v0.3.0](v0.3.0/README.md) | FFI driver registration + routing, working CLI, C# JSON fix, binding enhancements, FFI test suite |
+| [Agent Skills](gemini-skills/README.md) | Specialized on-demand expertise for Gemini CLI |
 
 ---
 
