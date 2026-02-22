@@ -1,6 +1,6 @@
 {
   "name": "omniql",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A standardized, multi-database query language (OQL) for TypeScript/Node.js.",
   "main": "dist/omniql.js",
   "types": "dist/omniql.d.ts",
@@ -17,6 +17,9 @@
     "ref-napi": "^3.0.3"
   },
   "devDependencies": {
+    "@types/ffi-napi": "^4.0.10",
+    "@types/node": "^20.0.0",
+    "@types/ref-napi": "^3.0.12",
     "typescript": "^5.0.0"
   },
   "scripts": {
