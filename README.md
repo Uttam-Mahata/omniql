@@ -279,6 +279,60 @@ engine.close();
 
 ---
 
+## Releases & Versioning
+
+OmniQL publishes four release tiers across all package ecosystems:
+
+| Tier | When | Version format |
+|------|------|----------------|
+| **Stable** | Tag `v0.9.0` | `0.9.0` |
+| **Release Candidate** | Tag `v0.9.0-rc.1` | `0.9.0-rc.1` |
+| **Beta** | Tag `v0.9.0-beta.1` | `0.9.0-beta.1` |
+| **Nightly** | Daily at 02:00 UTC | `0.9.0-nightly.20260223` |
+
+### Installing a specific tier
+
+**Python**
+```bash
+pip install omniql                        # stable
+pip install omniql==0.9.0-beta.1          # beta
+pip install omniql==0.9.0-nightly.20260223  # nightly (pre-release)
+```
+
+**npm**
+```bash
+npm install omniql           # stable (latest)
+npm install omniql@beta      # beta
+npm install omniql@next      # release candidate
+npm install omniql@nightly   # nightly
+```
+
+**NuGet (.NET)**
+```bash
+dotnet add package OmniQL                       # stable
+dotnet add package OmniQL --version 0.9.0-beta.1  # beta
+dotnet add package OmniQL --version 0.9.0-nightly.20260223 --prerelease  # nightly
+```
+
+**Maven (Java)**
+```xml
+<!-- Stable / Beta / RC -->
+<dependency>
+    <groupId>io.github.uttam-mahata</groupId>
+    <artifactId>omniql</artifactId>
+    <version>0.9.0</version>
+</dependency>
+
+<!-- Nightly (SNAPSHOT) — add GitHub Packages repository first -->
+<dependency>
+    <groupId>io.github.uttam-mahata</groupId>
+    <artifactId>omniql</artifactId>
+    <version>0.9.0-SNAPSHOT</version>
+</dependency>
+```
+
+---
+
 ## CLI
 
 The `omniql` binary lets you run ad-hoc OQL queries from the command line.
