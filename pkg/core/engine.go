@@ -25,11 +25,12 @@ var ErrNoDrivers = errors.New("no drivers registered")
 //  4. Hand the query to the Driver for AST translation and execution.
 //  5. Normalise raw results into OmniJSON and return them to the caller.
 type Engine struct {
-	mu       sync.RWMutex
-	drivers  map[string]Driver
-	routes   map[string]string // target name -> driver name
-	registry *SchemaRegistry
-	strict   bool
+	mu            sync.RWMutex
+	drivers       map[string]Driver
+	routes        map[string]string // target name -> driver name
+	registry      *SchemaRegistry
+	strict        bool
+	defaultDriver string // name of the first driver registered (deterministic fallback)
 }
 
 // EngineOption is a functional option for configuring the Engine.
@@ -55,16 +56,20 @@ func NewEngine(opts ...EngineOption) *Engine {
 }
 
 // RegisterDriver adds a Driver to the engine.  If a driver with the same name
-// already exists it is replaced.
+// already exists it is replaced.  The first driver registered becomes the
+// default fallback for targets with no explicit Route.
 func (e *Engine) RegisterDriver(d Driver) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.defaultDriver == "" {
+		e.defaultDriver = d.Name()
+	}
 	e.drivers[d.Name()] = d
 }
 
 // Route binds a collection/table target name to a specific driver name.
 // If no explicit route exists for a target, the engine falls back to the
-// first registered driver.
+// first registered driver (deterministic).
 func (e *Engine) Route(target, driverName string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -128,9 +133,11 @@ func (e *Engine) selectDriver(target string) (Driver, error) {
 		return d, nil
 	}
 
-	// Fallback: return the first registered driver.
-	for _, d := range e.drivers {
-		return d, nil
+	// Fallback: use the first registered driver (deterministic).
+	if e.defaultDriver != "" {
+		if d, ok := e.drivers[e.defaultDriver]; ok {
+			return d, nil
+		}
 	}
 
 	return nil, fmt.Errorf("%w: %q", ErrNoDrivers, target)

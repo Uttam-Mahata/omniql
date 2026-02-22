@@ -249,3 +249,85 @@ func TestOmniError_Error(t *testing.T) {
 		t.Errorf("got %q, want %q", e.Error(), want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Schema $or/$and validation tests (issue #2)
+// ---------------------------------------------------------------------------
+
+func TestSchemaRegistry_Validate_OrWithKnownFields(t *testing.T) {
+	reg := core.NewSchemaRegistry()
+	reg.Register(core.CollectionSchema{
+		Name: "products",
+		Fields: map[string]core.FieldSchema{
+			"name":  {Type: core.FieldTypeString},
+			"price": {Type: core.FieldTypeFloat},
+		},
+	})
+
+	err := reg.Validate(core.OQLQuery{
+		Target: "products",
+		Action: core.ActionFind,
+		Filter: core.Filter{
+			"$or": []interface{}{
+				map[string]interface{}{"name": "Widget"},
+				map[string]interface{}{"price": map[string]interface{}{"$lt": 100}},
+			},
+		},
+	}, false)
+	if err != nil {
+		t.Errorf("expected no error for $or with known fields, got %v", err)
+	}
+}
+
+func TestSchemaRegistry_Validate_OrWithUnknownField(t *testing.T) {
+	reg := core.NewSchemaRegistry()
+	reg.Register(core.CollectionSchema{
+		Name: "products",
+		Fields: map[string]core.FieldSchema{
+			"name":  {Type: core.FieldTypeString},
+			"price": {Type: core.FieldTypeFloat},
+		},
+	})
+
+	err := reg.Validate(core.OQLQuery{
+		Target: "products",
+		Action: core.ActionFind,
+		Filter: core.Filter{
+			"$or": []interface{}{
+				map[string]interface{}{"undeclared_field": 1},
+			},
+		},
+	}, false)
+	if err == nil {
+		t.Fatal("expected error for $or containing undeclared field")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic fallback driver tests (issue #1)
+// ---------------------------------------------------------------------------
+
+func TestEngine_DefaultDriverIsDeterministic(t *testing.T) {
+	engine := core.NewEngine()
+	mockA := &mockDriver{name: "first", rows: []map[string]interface{}{{"src": "first"}}, total: 1}
+	mockB := &mockDriver{name: "second", rows: []map[string]interface{}{{"src": "second"}}, total: 1}
+	engine.RegisterDriver(mockA)
+	engine.RegisterDriver(mockB)
+
+	// Without an explicit Route, the first-registered driver must always be used.
+	for i := 0; i < 5; i++ {
+		result, err := engine.Execute(context.Background(), core.OQLQuery{
+			Target: "unrouted",
+			Action: core.ActionFind,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Error != nil {
+			t.Fatalf("unexpected result error: %v", result.Error)
+		}
+		if result.Meta.Driver != "first" {
+			t.Errorf("iteration %d: expected first-registered driver, got %q", i, result.Meta.Driver)
+		}
+	}
+}

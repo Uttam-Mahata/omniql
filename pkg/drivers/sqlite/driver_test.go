@@ -452,3 +452,60 @@ func TestSQLiteDriver_InEmptySlice(t *testing.T) {
 		t.Fatal("expected error for empty $in slice")
 	}
 }
+
+func TestSQLiteDriver_FieldExclusionReturnsError(t *testing.T) {
+	db := setupDB(t)
+	defer db.Close()
+	drv := sqlite.NewFromDB(db)
+	ctx := context.Background()
+
+	if _, _, err := drv.Execute(ctx, core.OQLQuery{
+		Target:   "products",
+		Action:   core.ActionInsert,
+		Document: map[string]interface{}{"name": "A", "price": 1.0, "category": "x"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := drv.Execute(ctx, core.OQLQuery{
+		Target: "products",
+		Action: core.ActionFind,
+		Options: core.QueryOptions{
+			Fields: map[string]interface{}{"price": float64(0)},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for field exclusion (value=0)")
+	}
+}
+
+func TestSQLiteDriver_UpdateEmptyFilterReturnsError(t *testing.T) {
+	db := setupDB(t)
+	defer db.Close()
+	drv := sqlite.NewFromDB(db)
+	ctx := context.Background()
+
+	_, _, err := drv.Execute(ctx, core.OQLQuery{
+		Target:   "products",
+		Action:   core.ActionUpdate,
+		Document: map[string]interface{}{"price": 1.0},
+	})
+	if err == nil {
+		t.Fatal("expected error for UPDATE with empty filter")
+	}
+}
+
+func TestSQLiteDriver_DeleteEmptyFilterReturnsError(t *testing.T) {
+	db := setupDB(t)
+	defer db.Close()
+	drv := sqlite.NewFromDB(db)
+	ctx := context.Background()
+
+	_, _, err := drv.Execute(ctx, core.OQLQuery{
+		Target: "products",
+		Action: core.ActionDelete,
+	})
+	if err == nil {
+		t.Fatal("expected error for DELETE with empty filter")
+	}
+}

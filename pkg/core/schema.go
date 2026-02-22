@@ -44,10 +44,8 @@ func (r *SchemaRegistry) Validate(query OQLQuery, strict bool) error {
 		return nil
 	}
 
-	for field := range query.Filter {
-		if _, declared := schema.Fields[field]; !declared {
-			return fmt.Errorf("unknown filter field %q for target %q", field, query.Target)
-		}
+	if err := validateFilter(query.Filter, schema, query.Target); err != nil {
+		return err
 	}
 
 	for field := range query.Document {
@@ -60,5 +58,32 @@ func (r *SchemaRegistry) Validate(query OQLQuery, strict bool) error {
 		}
 	}
 
+	return nil
+}
+
+// validateFilter recursively validates that every field referenced in filter
+// (including inside $or/$and arrays) is declared in the schema.
+func validateFilter(filter map[string]interface{}, schema CollectionSchema, target string) error {
+	for field, val := range filter {
+		if field == "$or" || field == "$and" {
+			list, ok := val.([]interface{})
+			if !ok {
+				continue // let the driver report malformed logical operators
+			}
+			for _, item := range list {
+				sub, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if err := validateFilter(sub, schema, target); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if _, declared := schema.Fields[field]; !declared {
+			return fmt.Errorf("unknown filter field %q for target %q", field, target)
+		}
+	}
 	return nil
 }
