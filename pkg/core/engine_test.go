@@ -31,6 +31,9 @@ func (m *mockDriver) Execute(_ context.Context, _ core.OQLQuery) ([]map[string]i
 	}
 	return m.rows, m.total, nil
 }
+func (m *mockDriver) BatchInsert(_ context.Context, _ string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
+	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Engine tests

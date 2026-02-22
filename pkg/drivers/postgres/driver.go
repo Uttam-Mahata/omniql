@@ -171,6 +171,45 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 	return scanRows(rows, 1)
 }
 
+// BatchInsert implements core.Driver.
+func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
+	if len(docs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	first := docs[0]
+	cols := make([]string, 0, len(first))
+	for col := range first {
+		cols = append(cols, quote(col))
+	}
+
+	var values []string
+	var args []interface{}
+	pIdx := 1
+	for _, doc := range docs {
+		var rowPlaceholders []string
+		for col := range first {
+			rowPlaceholders = append(rowPlaceholders, fmt.Sprintf("$%d", pIdx))
+			args = append(args, doc[col])
+			pIdx++
+		}
+		values = append(values, "("+strings.Join(rowPlaceholders, ", ")+")")
+	}
+
+	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
+		quote(target),
+		strings.Join(cols, ", "),
+		strings.Join(values, ", "),
+	)
+
+	_, err := d.db.ExecContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("postgres batch: %w", err)
+	}
+
+	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
+}
+
 // update builds and executes an UPDATE statement.
 func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {

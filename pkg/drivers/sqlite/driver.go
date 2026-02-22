@@ -178,6 +178,58 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 	return []map[string]interface{}{{"id": id}}, 1, nil
 }
 
+// BatchInsert implements core.Driver.
+func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
+	if len(docs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite batch: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Assuming all documents have the same keys as the first one for simplicity in bulk insert stmt.
+	// For production, you'd want to handle heterogeneous keys or use multiple statements.
+	first := docs[0]
+	cols := make([]string, 0, len(first))
+	placeholders := make([]string, 0, len(first))
+	for col := range first {
+		cols = append(cols, quote(col))
+		placeholders = append(placeholders, "?")
+	}
+
+	stmtStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+		quote(target),
+		strings.Join(cols, ", "),
+		strings.Join(placeholders, ", "),
+	)
+
+	stmt, err := tx.PrepareContext(ctx, stmtStr)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite batch: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, doc := range docs {
+		vals := make([]interface{}, 0, len(first))
+		for col := range first {
+			vals = append(vals, doc[col])
+		}
+		if _, err := stmt.ExecContext(ctx, vals...); err != nil {
+			return nil, fmt.Errorf("sqlite batch: exec: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("sqlite batch: commit: %w", err)
+	}
+
+	// Returning count/status for batch insert.
+	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
+}
+
 func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {
 		return nil, 0, fmt.Errorf("sqlite: UPDATE requires a non-empty document")

@@ -42,6 +42,9 @@ type Driver interface {
 	// with the total count of matching records and any error that occurred.
 	Execute(ctx context.Context, query OQLQuery) (rows []map[string]interface{}, total int64, err error)
 
+	// BatchInsert inserts multiple records in a single operation.
+	BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) (rows []map[string]interface{}, err error)
+
 	// Ping verifies that the underlying database connection is healthy.
 	Ping(ctx context.Context) error
 

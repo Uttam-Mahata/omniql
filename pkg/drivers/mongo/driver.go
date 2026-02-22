@@ -121,6 +121,31 @@ func (d *Driver) insert(ctx context.Context, coll *mongo.Collection, query core.
 	return []map[string]interface{}{{"_id": insertResult.InsertedID}}, 1, nil
 }
 
+// BatchInsert implements core.Driver.
+func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
+	if len(docs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	coll := d.client.Database(d.dbName).Collection(target)
+
+	var ui []interface{}
+	for _, doc := range docs {
+		ui = append(ui, doc)
+	}
+
+	result, err := coll.InsertMany(ctx, ui)
+	if err != nil {
+		return nil, fmt.Errorf("mongo batch: %w", err)
+	}
+
+	var rows []map[string]interface{}
+	for _, id := range result.InsertedIDs {
+		rows = append(rows, map[string]interface{}{"_id": id})
+	}
+	return rows, nil
+}
+
 func (d *Driver) update(ctx context.Context, coll *mongo.Collection, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {
 		return nil, 0, fmt.Errorf("mongo: UPDATE requires a non-empty document")
