@@ -4,7 +4,7 @@
     <TargetFrameworks>netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <AssemblyName>OmniQL</AssemblyName>
     <RootNamespace>OmniQL</RootNamespace>
-    <Version>0.6.1</Version>
+    <Version>0.6.2</Version>
     <Authors>Uttam Mahata</Authors>
     <Description>A standardized, multi-database query language (OQL) for .NET.</Description>
     <PackageProjectUrl>https://github.com/Uttam-Mahata/omniql</PackageProjectUrl>
