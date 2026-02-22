@@ -119,20 +119,30 @@ jobs:
           path: core-artifacts
       - name: Build and Publish
         env:
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          OSSRH_TOKEN: ${{ secrets.OSSRH_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
         run: |
           mkdir -p bindings/java/src/main/resources/native
           cp core-artifacts/core-linux/libomniql.so bindings/java/src/main/resources/native/
           cp core-artifacts/core-darwin/libomniql.dylib bindings/java/src/main/resources/native/
           cp core-artifacts/core-windows/omniql.dll bindings/java/src/main/resources/native/
+          
           cd bindings/java
-          # Use system properties to pass credentials directly to the staging plugin
-          mvn clean deploy -P release -DskipTests \
-            -Dgpg.passphrase=${{ secrets.MAVEN_GPG_PASSPHRASE }} \
-            -Dnexus.username=${{ secrets.OSSRH_USERNAME }} \
-            -Dnexus.password=${{ secrets.OSSRH_TOKEN }} \
-            --batch-mode
+          # Generate settings.xml with the requested format
+          cat <<EOF > settings.xml
+          <settings>
+            <servers>
+              <server>
+                <id>ossrh</id>
+                <username>\${env.OSSRH_USERNAME}</username>
+                <password>\${env.OSSRH_TOKEN}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+          
+          mvn clean deploy -P release -DskipTests -s settings.xml -Dgpg.passphrase=${{ secrets.MAVEN_GPG_PASSPHRASE }} --batch-mode
 
   publish-nuget:
     name: Publish .NET Package to NuGet
