@@ -4,14 +4,14 @@
     <TargetFrameworks>netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <AssemblyName>OmniQL</AssemblyName>
     <RootNamespace>OmniQL</RootNamespace>
-    <Version>0.6.0</Version>
+    <Version>0.6.1</Version>
     <Authors>Uttam Mahata</Authors>
     <Description>A standardized, multi-database query language (OQL) for .NET.</Description>
     <PackageProjectUrl>https://github.com/Uttam-Mahata/omniql</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Uttam-Mahata/omniql</RepositoryUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <LangVersion>8.0</LangVersion>
+    <LangVersion>10.0</LangVersion>
     <Nullable>enable</Nullable>
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
