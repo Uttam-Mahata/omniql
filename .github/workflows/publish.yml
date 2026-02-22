@@ -2,10 +2,41 @@ name: Publish to Registries
 
 on:
   push:
+    branches:
+      - dev
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - dev
+      - main
 
 jobs:
+  get-version:
+    name: Calculate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.versioning.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: versioning
+        run: |
+          # Extract base version from python manifest as source of truth
+          BASE_VERSION=$(grep "^version =" bindings/python/pyproject.toml | cut -d '"' -f 2 | cut -d '-' -f 1)
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          elif [[ $GITHUB_EVENT_NAME == pull_request ]]; then
+            if [[ $GITHUB_BASE_REF == main ]]; then
+              VERSION="$BASE_VERSION-rc.$GITHUB_RUN_NUMBER"
+            else
+              VERSION="$BASE_VERSION-dev.$GITHUB_RUN_NUMBER"
+            fi
+          else
+            VERSION="$BASE_VERSION-dev.$GITHUB_RUN_NUMBER"
+          fi
+          echo "Calculated Version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   build-core:
     name: Build Go Core Shared Library (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -44,7 +75,7 @@ jobs:
 
   publish-pypi:
     name: Publish Python Wheels to PyPI
-    needs: build-core
+    needs: [build-core, get-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +86,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: core-artifacts
+      - name: Set Version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ needs.get-version.outputs.version }}\"/" bindings/python/pyproject.toml
       - name: Build and Publish Wheels
         env:
           TWINE_USERNAME: __token__
@@ -70,7 +104,7 @@ jobs:
 
   publish-npm:
     name: Publish npm Package
-    needs: build-core
+    needs: [build-core, get-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +116,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: core-artifacts
+      - name: Set Version
+        run: |
+          cd bindings/typescript
+          npm version ${{ needs.get-version.outputs.version }} --no-git-tag-version
       - name: Prepare npm Package
         run: |
           cd bindings/typescript
@@ -97,43 +135,9 @@ jobs:
           cd bindings/typescript
           npm publish --access public
 
-    publish-maven:
-      name: Publish Java Package to Maven Central
-      needs: build-core
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-        - name: Set up JDK
-          uses: actions/setup-java@v4
-          with:
-            java-version: '11'
-            distribution: 'temurin'
-            server-id: central
-            server-username: MAVEN_USERNAME
-            server-password: MAVEN_PASSWORD
-            gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-            gpg-passphrase: MAVEN_GPG_PASSPHRASE
-        - name: Download Artifacts
-          uses: actions/download-artifact@v4
-          with:
-            path: core-artifacts
-        - name: Build and Publish
-          env:
-            MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-            MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
-            GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
-          run: |
-            mkdir -p bindings/java/src/main/resources/native
-            cp core-artifacts/core-linux/libomniql.so bindings/java/src/main/resources/native/
-            cp core-artifacts/core-darwin/libomniql.dylib bindings/java/src/main/resources/native/
-            cp core-artifacts/core-windows/omniql.dll bindings/java/src/main/resources/native/
-            
-            cd bindings/java
-            mvn clean deploy -P release -DskipTests -Dgpg.passphrase=${{ secrets.MAVEN_GPG_PASSPHRASE }} --batch-mode
-
   publish-nuget:
     name: Publish .NET Package to NuGet
-    needs: build-core
+    needs: [build-core, get-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,6 +149,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: core-artifacts
+      - name: Set Version
+        run: |
+          sed -i "s/<Version>.*<\/Version>/<Version>${{ needs.get-version.outputs.version }}<\/Version>/" bindings/csharp/OmniQL/OmniQL.csproj
       - name: Build and Publish
         run: |
           cd bindings/csharp/OmniQL
