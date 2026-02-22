@@ -6,6 +6,7 @@ package mongo
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
 	"go.mongodb.org/mongo-driver/bson"
@@ -58,7 +59,10 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 }
 
 func (d *Driver) find(ctx context.Context, coll *mongo.Collection, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	filter := buildFilter(query.Filter)
+	filter, err := buildFilter(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	total, err := coll.CountDocuments(ctx, filter)
 	if err != nil {
@@ -75,6 +79,22 @@ func (d *Driver) find(ctx context.Context, coll *mongo.Collection, query core.OQ
 	}
 	if query.Options.Skip > 0 {
 		opts.SetSkip(int64(query.Options.Skip))
+	}
+	if len(query.Options.Sort) > 0 {
+		keys := make([]string, 0, len(query.Options.Sort))
+		for k := range query.Options.Sort {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		sortDoc := bson.D{}
+		for _, k := range keys {
+			sortDoc = append(sortDoc, bson.E{Key: k, Value: query.Options.Sort[k]})
+		}
+		opts.SetSort(sortDoc)
+	}
+	if len(query.Options.Fields) > 0 {
+		opts.SetProjection(bson.M(query.Options.Fields))
 	}
 
 	cursor, err := coll.Find(ctx, filter, opts)
@@ -94,18 +114,46 @@ func (d *Driver) insert(ctx context.Context, coll *mongo.Collection, query core.
 	if len(query.Document) == 0 {
 		return nil, 0, fmt.Errorf("mongo: INSERT requires a non-empty document")
 	}
-	_, err := coll.InsertOne(ctx, query.Document)
+	insertResult, err := coll.InsertOne(ctx, query.Document)
 	if err != nil {
 		return nil, 0, fmt.Errorf("mongo insert: %w", err)
 	}
-	return []map[string]interface{}{}, 1, nil
+	return []map[string]interface{}{{"_id": insertResult.InsertedID}}, 1, nil
+}
+
+// BatchInsert implements core.Driver.
+func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
+	if len(docs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	coll := d.client.Database(d.dbName).Collection(target)
+
+	var ui []interface{}
+	for _, doc := range docs {
+		ui = append(ui, doc)
+	}
+
+	result, err := coll.InsertMany(ctx, ui)
+	if err != nil {
+		return nil, fmt.Errorf("mongo batch: %w", err)
+	}
+
+	var rows []map[string]interface{}
+	for _, id := range result.InsertedIDs {
+		rows = append(rows, map[string]interface{}{"_id": id})
+	}
+	return rows, nil
 }
 
 func (d *Driver) update(ctx context.Context, coll *mongo.Collection, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {
 		return nil, 0, fmt.Errorf("mongo: UPDATE requires a non-empty document")
 	}
-	filter := buildFilter(query.Filter)
+	filter, err := buildFilter(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 	update := bson.M{"$set": query.Document}
 
 	result, err := coll.UpdateMany(ctx, filter, update)
@@ -116,7 +164,10 @@ func (d *Driver) update(ctx context.Context, coll *mongo.Collection, query core.
 }
 
 func (d *Driver) delete(ctx context.Context, coll *mongo.Collection, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	filter := buildFilter(query.Filter)
+	filter, err := buildFilter(query.Filter)
+	if err != nil {
+		return nil, 0, err
+	}
 	result, err := coll.DeleteMany(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("mongo delete: %w", err)
@@ -126,19 +177,65 @@ func (d *Driver) delete(ctx context.Context, coll *mongo.Collection, query core.
 
 // buildFilter converts an OQL Filter into a MongoDB bson.M filter document.
 // OQL operators ($in, $lt, $gt, etc.) map directly to MongoDB operators.
-func buildFilter(filter core.Filter) bson.M {
+func buildFilter(filter core.Filter) (bson.M, error) {
 	if len(filter) == 0 {
-		return bson.M{}
+		return bson.M{}, nil
 	}
 	doc := make(bson.M, len(filter))
 	for field, constraint := range filter {
+		// Handle logical operators
+		if field == "$or" || field == "$and" {
+			list, ok := toSlice(constraint)
+			if !ok {
+				return nil, fmt.Errorf("mongo: %s requires a slice", field)
+			}
+
+			subFilters := make(bson.A, 0, len(list))
+			for _, item := range list {
+				subFilter, ok := item.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("mongo: %s elements must be objects", field)
+				}
+				// Recurse
+				subDoc, err := buildFilter(subFilter)
+				if err != nil {
+					return nil, err
+				}
+				subFilters = append(subFilters, subDoc)
+			}
+			doc[field] = subFilters
+			continue
+		}
+
 		switch c := constraint.(type) {
 		case map[string]interface{}:
+			// Validate $in / $nin usage
+			for op, val := range c {
+				if op == "$in" || op == "$nin" {
+					if vals, ok := toSlice(val); ok {
+						if len(vals) == 0 {
+							return nil, fmt.Errorf("mongo: %s requires non-empty slice", op)
+						}
+					} else {
+						return nil, fmt.Errorf("mongo: %s requires a slice", op)
+					}
+				}
+			}
 			// OQL operators align with MongoDB operators – pass them through directly.
 			doc[field] = bson.M(c)
 		default:
 			doc[field] = constraint
 		}
 	}
-	return doc
+	return doc, nil
+}
+
+// toSlice converts an interface{} to []interface{} if possible.
+func toSlice(v interface{}) ([]interface{}, bool) {
+	switch s := v.(type) {
+	case []interface{}:
+		return s, true
+	default:
+		return nil, false
+	}
 }
