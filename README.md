@@ -1,6 +1,6 @@
 # OmniQL — One Query Language, Every Database.
 
-> **Version:** v0.7.1
+> **Version:** v0.8.0
 > **Module:** `github.com/Uttam-Mahata/omniql`
 
 OmniQL is a unified data access layer that abstracts away the complexity of
@@ -50,7 +50,7 @@ handles its own query translation and execution.
 | Time-Series        | InfluxDB, TimescaleDB, QuestDB                           | Time-windowed aggregations                  |
 | Graph              | Neo4j, SurrealDB, Memgraph                               | Relationship / traversal queries            |
 
-**v0.7.1 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
+**v0.8.0 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
 
 ---
 
@@ -207,9 +207,9 @@ Add the following dependency to your `pom.xml`:
 
 ```xml
 <dependency>
-    <groupId>io.omniql</groupId>
+    <groupId>io.github.uttam-mahata</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.5.6</version>
+    <version>0.8.0</version>
 </dependency>
 ```
 
@@ -345,7 +345,7 @@ go test ./...
 
 ## Advanced Features (Roadmap)
 
-### v0.5.0 (Released)
+### v0.8.0 (Released)
 - **Mixed Projection** — Support mixed include/exclude projection (requires schema awareness).
 - **Transactions** — `BeginTx` / `Commit` / `Rollback` as an optional `TransactionalDriver` interface.
 - **Batch inserts** — insert multiple documents in a single round-trip.
