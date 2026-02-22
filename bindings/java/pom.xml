@@ -6,7 +6,7 @@
 
     <groupId>io.omniql</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.6.8</version>
+    <version>0.6.9</version>
     <name>OmniQL Java Binding</name>
     <description>A standardized, multi-database query language (OQL) for Java.</description>
     <url>https://github.com/Uttam-Mahata/omniql</url>

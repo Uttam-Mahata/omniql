@@ -135,8 +135,8 @@ jobs:
             <servers>
               <server>
                 <id>ossrh</id>
-                <username>\${env.OSSRH_USERNAME}</username>
-                <password>\${env.OSSRH_TOKEN}</password>
+                <username>${{ secrets.OSSRH_USERNAME }}</username>
+                <password>${{ secrets.OSSRH_TOKEN }}</password>
               </server>
             </servers>
           </settings>
