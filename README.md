@@ -1,2 +1,205 @@
-# omniql
-OmniQL is a universal database adapter and query engine. It provides a single, unified interface for interacting with diverse database technologies (SQL, Document, Key-Value, Graph)   across multiple programming languages. 
+# OmniQL — One Query Language, Every Database.
+
+> **Version:** v0.2.0  
+> **Module:** `github.com/Uttam-Mahata/omniql`
+
+OmniQL is a unified data access layer that abstracts away the complexity of
+database-specific protocols and languages. It exposes a single, model-agnostic
+query format — **OQL (OmniQL Query Language)** — and routes queries to
+pluggable database drivers, returning results in a standardised **OmniJSON**
+format.
+
+---
+
+## Architecture
+
+```
+Language Binding (Java / Python / C# / TypeScript)
+        │
+        │  JSON-encoded OQLQuery
+        ▼
+┌──────────────────────────────────────┐
+│          OmniQL Core Engine          │
+│  1. Schema Resolver (validation)     │
+│  2. Driver Selection (routing)       │
+│  3. AST Translation (via driver)     │
+│  4. Execution (native DB command)    │
+│  5. Normalization → OmniJSON         │
+└──────────────────────────────────────┘
+        │
+   ┌────┴────────────────────┐
+   │                         │
+   ▼                         ▼
+Postgres Driver          SQLite Driver   … (Mongo, Redis, ES, …)
+```
+
+The engine is a **Traffic Controller**: it never knows the details of any
+specific database. Each driver implements the `core.Driver` interface and
+handles its own query translation and execution.
+
+---
+
+## Supported Databases (Roadmap)
+
+| Category           | Target Databases                                         | Unified Action                              |
+|--------------------|----------------------------------------------------------|---------------------------------------------|
+| Relational (SQL)   | PostgreSQL, MySQL, SQLite, MariaDB, SQL Server, Oracle   | `SELECT / INSERT / UPDATE / DELETE`         |
+| Document (NoSQL)   | MongoDB, CouchDB, DynamoDB, Firestore                    | BSON/JSON-based lookup and filters          |
+| Key-Value / Cache  | Redis, Dragonfly, Memcached, Valkey                      | `GET / SET` with TTL support                |
+| Search Engines     | Elasticsearch, Meilisearch, Algolia, Typesense           | Full-text search and vector queries         |
+| Time-Series        | InfluxDB, TimescaleDB, QuestDB                           | Time-windowed aggregations                  |
+| Graph              | Neo4j, SurrealDB, Memgraph                               | Relationship / traversal queries            |
+
+**v0.2.0 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
+
+---
+
+## OQL Query Format
+
+OQL is **model-agnostic**: the same query object works regardless of whether
+the underlying store is a table, a collection, or a search index.
+
+```json
+{
+  "target": "analytics_data",
+  "action": "FIND",
+  "filter": {
+    "category": { "$in": ["electronics", "books"] },
+    "price":    { "$lt": 500 }
+  },
+  "options": { "limit": 20 }
+}
+```
+
+### Actions
+
+| Action   | Description               |
+|----------|---------------------------|
+| `FIND`   | Query / select records    |
+| `INSERT` | Create a new record       |
+| `UPDATE` | Modify existing records   |
+| `DELETE` | Remove records            |
+| `COUNT`  | Count matching records    |
+
+### Filter operators
+
+| Operator | Meaning          |
+|----------|------------------|
+| `$eq`    | Equal            |
+| `$ne`    | Not equal        |
+| `$lt`    | Less than        |
+| `$lte`   | Less than or eq  |
+| `$gt`    | Greater than     |
+| `$gte`   | Greater than or eq |
+| `$in`    | In set           |
+| `$nin`   | Not in set       |
+
+---
+
+## Project Layout
+
+```
+omniql/
+├── pkg/
+│   ├── core/               # Engine, Driver interface, Schema, OQL types, OmniJSON
+│   ├── drivers/
+│   │   ├── postgres/       # PostgreSQL driver (database/sql + pgx)
+│   │   ├── mongo/          # MongoDB driver (mongo-driver)
+│   │   └── sqlite/         # SQLite driver (go-sqlite3)
+│   └── ffi/                # C-shared library (FFI for language bindings)
+├── bindings/
+│   ├── java/               # JNI wrapper — OmniEngine.java
+│   ├── python/             # CFFI extension — omniql.py
+│   ├── csharp/             # P/Invoke wrapper — OmniEngine.cs
+│   └── typescript/         # ffi-napi addon — omniql.ts
+└── cmd/omniql/             # CLI entry-point
+```
+
+---
+
+## Getting Started (Go)
+
+```go
+import (
+    "context"
+    "github.com/Uttam-Mahata/omniql/pkg/core"
+    "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
+)
+
+func main() {
+    // 1. Create a driver.
+    drv, _ := sqlite.New(":memory:")
+
+    // 2. Create and configure the engine.
+    engine := core.NewEngine()
+    engine.RegisterDriver(drv)
+    engine.Route("products", drv.Name())
+
+    // 3. Execute an OQL query.
+    result, _ := engine.Execute(context.Background(), core.OQLQuery{
+        Target: "products",
+        Action: core.ActionFind,
+        Filter: core.Filter{
+            "price": map[string]interface{}{"$lt": 500},
+        },
+        Options: core.QueryOptions{Limit: 10},
+    })
+
+    // result.Data  — []map[string]interface{}
+    // result.Meta  — driver name, total count, …
+}
+```
+
+---
+
+## Building the FFI Shared Library
+
+```bash
+go build -buildmode=c-shared -o libomniql.so ./pkg/ffi
+```
+
+This produces `libomniql.so` (Linux) / `omniql.dll` (Windows) which the
+language bindings load at runtime.
+
+---
+
+## Multi-Language Bindings
+
+| Language    | Mechanism        | Location                    |
+|-------------|------------------|-----------------------------|
+| Java        | JNI              | `bindings/java/`            |
+| Python      | CFFI + asyncio   | `bindings/python/`          |
+| C# / .NET   | P/Invoke         | `bindings/csharp/`          |
+| TypeScript  | ffi-napi (N-API) | `bindings/typescript/`      |
+
+---
+
+## Running Tests
+
+```bash
+# Core engine tests
+go test ./pkg/core/...
+
+# SQLite driver integration tests (no external DB required)
+go test ./pkg/drivers/sqlite/...
+
+# PostgreSQL filter unit tests
+go test ./pkg/drivers/postgres/...
+
+# All tests
+go test ./...
+```
+
+---
+
+## Advanced Features (Roadmap)
+
+- **Virtual DB / Federation** — join data from Postgres and MongoDB in a single query.
+- **Unified Migration CLI** — `omniql-migrate up` applies schema changes across all databases simultaneously.
+- **Real-time Sync (CDC)** — listen for changes in one database and automatically sync to another.
+
+---
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
