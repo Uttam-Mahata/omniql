@@ -70,6 +70,16 @@ func goRegisterSQLiteDriver(handle int, dsn string) string {
 	return s
 }
 
+// goRegisterMySQLDriver wraps OmniQL_RegisterMySQLDriver.
+func goRegisterMySQLDriver(handle int, dsn string) string {
+	cs := C.CString(dsn)
+	defer C.free(unsafe.Pointer(cs))
+	result := OmniQL_RegisterMySQLDriver(C.int(handle), cs)
+	s := C.GoString(result)
+	C.free(unsafe.Pointer(result))
+	return s
+}
+
 // goGetEngine is a test-helper wrapper around getEngine that accepts a plain
 // Go int rather than a C.int.
 func goGetEngine(handle int) *core.Engine {

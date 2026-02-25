@@ -1,7 +1,6 @@
-// Package postgres provides an OmniQL driver for PostgreSQL databases.
-// It translates OQL queries into standard SQL and executes them via the
-// database/sql interface with the pgx driver.
-package postgres
+// Package mysql provides an OmniQL driver for MySQL databases.
+// It translates OQL queries into standard SQL using the go-sql-driver/mysql driver.
+package mysql
 
 import (
 	"context"
@@ -11,18 +10,28 @@ import (
 	"strings"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	_ "github.com/go-sql-driver/mysql" // MySQL database driver
 )
 
-const driverName = "postgres"
+const driverName = "mysql"
 
-// Driver is the OmniQL PostgreSQL adapter.
+// Driver is the OmniQL MySQL adapter.
 type Driver struct {
 	db *sql.DB
 }
 
-// New creates a new PostgreSQL Driver using the provided *sql.DB connection.
-// The caller is responsible for opening and configuring the connection.
-func New(db *sql.DB) *Driver {
+// New opens a MySQL database using the given DSN and returns a Driver wrapping it.
+// DSN format: "user:password@tcp(host:port)/dbname?parseTime=true"
+func New(dsn string) (*Driver, error) {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("mysql: open %q: %w", dsn, err)
+	}
+	return &Driver{db: db}, nil
+}
+
+// NewFromDB creates a Driver from an existing *sql.DB.
+func NewFromDB(db *sql.DB) *Driver {
 	return &Driver{db: db}
 }
 
@@ -35,8 +44,7 @@ func (d *Driver) Ping(ctx context.Context) error { return d.db.PingContext(ctx) 
 // Close satisfies core.Driver.
 func (d *Driver) Close() error { return d.db.Close() }
 
-// Execute translates an OQLQuery into a SQL statement, runs it, and returns
-// the result rows as a slice of generic maps.
+// Execute translates an OQLQuery into SQL, runs it, and returns the results.
 func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	switch query.Action {
 	case core.ActionFind, core.ActionCount:
@@ -48,24 +56,23 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 	case core.ActionDelete:
 		return d.delete(ctx, query)
 	default:
-		return nil, 0, fmt.Errorf("postgres: unsupported action %q", query.Action)
+		return nil, 0, fmt.Errorf("mysql: unsupported action %q", query.Action)
 	}
 }
 
-// find builds and executes a SELECT statement.
 func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	where, args, err := buildWhere(query.Filter)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", quote(query.Target))
+	countSQL := "SELECT COUNT(*) FROM " + quote(query.Target)
 	if where != "" {
 		countSQL += " WHERE " + where
 	}
 	var total int64
 	if err := d.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("postgres count: %w", err)
+		return nil, 0, fmt.Errorf("mysql count: %w", err)
 	}
 
 	if query.Action == core.ActionCount {
@@ -78,19 +85,19 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 		for field, val := range query.Options.Fields {
 			inc, err := fieldProjectionValue(val)
 			if err != nil {
-				return nil, 0, fmt.Errorf("postgres: %w", err)
+				return nil, 0, fmt.Errorf("mysql: %w", err)
 			}
 			if inc {
 				cols = append(cols, quote(field))
 			}
 		}
 		if len(cols) > 0 {
-			sort.Strings(cols) // Sort for deterministic SQL
+			sort.Strings(cols)
 			fields = strings.Join(cols, ", ")
 		}
 	}
 
-	selectSQL := fmt.Sprintf("SELECT %s FROM %s", fields, quote(query.Target))
+	selectSQL := "SELECT " + fields + " FROM " + quote(query.Target)
 	if where != "" {
 		selectSQL += " WHERE " + where
 	}
@@ -123,43 +130,43 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 
 	rows, err := d.db.QueryContext(ctx, selectSQL, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("postgres select: %w", err)
+		return nil, 0, fmt.Errorf("mysql select: %w", err)
 	}
 	defer rows.Close()
 
 	return scanRows(rows, total)
 }
 
-// insert builds and executes an INSERT statement.
 func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {
-		return nil, 0, fmt.Errorf("postgres: INSERT requires a non-empty document")
+		return nil, 0, fmt.Errorf("mysql: INSERT requires a non-empty document")
 	}
 
 	cols := make([]string, 0, len(query.Document))
 	placeholders := make([]string, 0, len(query.Document))
 	vals := make([]interface{}, 0, len(query.Document))
-	i := 1
 	for col, val := range query.Document {
 		cols = append(cols, quote(col))
-		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
+		placeholders = append(placeholders, "?")
 		vals = append(vals, val)
-		i++
 	}
 
-	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
+	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		quote(query.Target),
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
 	)
 
-	rows, err := d.db.QueryContext(ctx, stmt, vals...)
+	result, err := d.db.ExecContext(ctx, stmt, vals...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("postgres insert: %w", err)
+		return nil, 0, fmt.Errorf("mysql insert: %w", err)
 	}
-	defer rows.Close()
 
-	return scanRows(rows, 1)
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, 0, fmt.Errorf("mysql insert id: %w", err)
+	}
+	return []map[string]interface{}{{"id": id}}, 1, nil
 }
 
 // BatchInsert implements core.Driver.
@@ -168,142 +175,136 @@ func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[stri
 		return []map[string]interface{}{}, nil
 	}
 
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("mysql batch: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	first := docs[0]
-	// Sort column names to guarantee consistent ordering between statement and values.
+	cols := make([]string, 0, len(first))
 	colOrder := make([]string, 0, len(first))
+	placeholders := make([]string, 0, len(first))
 	for col := range first {
-		colOrder = append(colOrder, col)
-	}
-	sort.Strings(colOrder)
-
-	cols := make([]string, 0, len(colOrder))
-	for _, col := range colOrder {
 		cols = append(cols, quote(col))
+		colOrder = append(colOrder, col)
+		placeholders = append(placeholders, "?")
 	}
 
-	var values []string
-	var args []interface{}
-	pIdx := 1
-	for _, doc := range docs {
-		var rowPlaceholders []string
-		for _, col := range colOrder {
-			rowPlaceholders = append(rowPlaceholders, fmt.Sprintf("$%d", pIdx))
-			args = append(args, doc[col])
-			pIdx++
-		}
-		values = append(values, "("+strings.Join(rowPlaceholders, ", ")+")")
-	}
-
-	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
+	stmtStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		quote(target),
 		strings.Join(cols, ", "),
-		strings.Join(values, ", "),
+		strings.Join(placeholders, ", "),
 	)
 
-	_, err := d.db.ExecContext(ctx, stmt, args...)
+	stmt, err := tx.PrepareContext(ctx, stmtStr)
 	if err != nil {
-		return nil, fmt.Errorf("postgres batch: %w", err)
+		return nil, fmt.Errorf("mysql batch: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, doc := range docs {
+		vals := make([]interface{}, 0, len(first))
+		for _, col := range colOrder {
+			vals = append(vals, doc[col])
+		}
+		if _, err := stmt.ExecContext(ctx, vals...); err != nil {
+			return nil, fmt.Errorf("mysql batch: exec: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("mysql batch: commit: %w", err)
 	}
 
 	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
 }
 
-// update builds and executes an UPDATE statement.
 func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Document) == 0 {
-		return nil, 0, fmt.Errorf("postgres: UPDATE requires a non-empty document")
+		return nil, 0, fmt.Errorf("mysql: UPDATE requires a non-empty document")
 	}
 	if len(query.Filter) == 0 {
-		return nil, 0, fmt.Errorf("postgres: UPDATE requires a non-empty filter to prevent accidental bulk updates")
+		return nil, 0, fmt.Errorf("mysql: UPDATE requires a non-empty filter to prevent accidental bulk updates")
 	}
 
 	setClauses := make([]string, 0, len(query.Document))
 	args := make([]interface{}, 0, len(query.Document))
-	i := 1
 	for col, val := range query.Document {
-		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", quote(col), i))
+		setClauses = append(setClauses, quote(col)+" = ?")
 		args = append(args, val)
-		i++
 	}
 
-	where, whereArgs, err := buildWhereFrom(query.Filter, i)
+	where, whereArgs, err := buildWhere(query.Filter)
 	if err != nil {
 		return nil, 0, err
 	}
 	args = append(args, whereArgs...)
 
-	stmt := fmt.Sprintf("UPDATE %s SET %s", quote(query.Target), strings.Join(setClauses, ", "))
+	stmt := "UPDATE " + quote(query.Target) + " SET " + strings.Join(setClauses, ", ")
 	if where != "" {
 		stmt += " WHERE " + where
 	}
 
 	result, err := d.db.ExecContext(ctx, stmt, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("postgres update: %w", err)
+		return nil, 0, fmt.Errorf("mysql update: %w", err)
 	}
 	affected, _ := result.RowsAffected()
 	return []map[string]interface{}{}, affected, nil
 }
 
-// delete builds and executes a DELETE statement.
 func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	if len(query.Filter) == 0 {
-		return nil, 0, fmt.Errorf("postgres: DELETE requires a non-empty filter to prevent accidental bulk deletes")
+		return nil, 0, fmt.Errorf("mysql: DELETE requires a non-empty filter to prevent accidental bulk deletes")
 	}
 	where, args, err := buildWhere(query.Filter)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	stmt := fmt.Sprintf("DELETE FROM %s", quote(query.Target))
+	stmt := "DELETE FROM " + quote(query.Target)
 	if where != "" {
 		stmt += " WHERE " + where
 	}
 
 	result, err := d.db.ExecContext(ctx, stmt, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("postgres delete: %w", err)
+		return nil, 0, fmt.Errorf("mysql delete: %w", err)
 	}
 	affected, _ := result.RowsAffected()
 	return []map[string]interface{}{}, affected, nil
 }
 
 // buildWhere translates an OQL Filter into a parameterised SQL WHERE clause.
-// Parameters are numbered from $1.
+// MySQL uses ? as the parameter placeholder.
 func buildWhere(filter core.Filter) (string, []interface{}, error) {
-	return buildWhereFrom(filter, 1)
-}
-
-// buildWhereFrom is like buildWhere but starts parameter numbering at startIdx.
-func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, error) {
 	if len(filter) == 0 {
 		return "", nil, nil
 	}
 
 	clauses := make([]string, 0, len(filter))
 	args := make([]interface{}, 0, len(filter))
-	i := startIdx
 
 	for field, constraint := range filter {
 		if field == "$or" || field == "$and" {
 			list, ok := toSlice(constraint)
 			if !ok {
-				return "", nil, fmt.Errorf("postgres: %s requires a slice", field)
+				return "", nil, fmt.Errorf("mysql: %s requires a slice", field)
 			}
 			subClauses := make([]string, 0, len(list))
 			for _, item := range list {
 				subFilter, ok := item.(map[string]interface{})
 				if !ok {
-					return "", nil, fmt.Errorf("postgres: %s elements must be objects", field)
+					return "", nil, fmt.Errorf("mysql: %s elements must be objects", field)
 				}
-				subWhere, subArgs, err := buildWhereFrom(subFilter, i)
+				subWhere, subArgs, err := buildWhere(subFilter)
 				if err != nil {
 					return "", nil, err
 				}
 				if subWhere != "" {
 					subClauses = append(subClauses, "("+subWhere+")")
 					args = append(args, subArgs...)
-					i += len(subArgs)
 				}
 			}
 			op := " OR "
@@ -321,68 +322,58 @@ func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, er
 			for op, val := range c {
 				switch op {
 				case "$eq":
-					clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" = ?")
 					args = append(args, val)
-					i++
 				case "$ne":
-					clauses = append(clauses, fmt.Sprintf("%s != $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" != ?")
 					args = append(args, val)
-					i++
 				case "$lt":
-					clauses = append(clauses, fmt.Sprintf("%s < $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" < ?")
 					args = append(args, val)
-					i++
 				case "$lte":
-					clauses = append(clauses, fmt.Sprintf("%s <= $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" <= ?")
 					args = append(args, val)
-					i++
 				case "$gt":
-					clauses = append(clauses, fmt.Sprintf("%s > $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" > ?")
 					args = append(args, val)
-					i++
 				case "$gte":
-					clauses = append(clauses, fmt.Sprintf("%s >= $%d", translateColumn(field), i))
+					clauses = append(clauses, translateColumn(field)+" >= ?")
 					args = append(args, val)
-					i++
 				case "$in":
 					if vals, ok := toSlice(val); ok {
 						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("postgres: $in requires non-empty slice")
+							return "", nil, fmt.Errorf("mysql: $in requires non-empty slice")
 						}
 						placeholders := make([]string, len(vals))
-						for j, v := range vals {
-							placeholders[j] = fmt.Sprintf("$%d", i)
+						for i, v := range vals {
+							placeholders[i] = "?"
 							args = append(args, v)
-							i++
 						}
-						clauses = append(clauses, fmt.Sprintf("%s IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
+						clauses = append(clauses, translateColumn(field)+" IN ("+strings.Join(placeholders, ", ")+")")
 					} else {
-						return "", nil, fmt.Errorf("postgres: $in requires a slice")
+						return "", nil, fmt.Errorf("mysql: $in requires a slice")
 					}
 				case "$nin":
 					if vals, ok := toSlice(val); ok {
 						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("postgres: $nin requires non-empty slice")
+							return "", nil, fmt.Errorf("mysql: $nin requires non-empty slice")
 						}
 						placeholders := make([]string, len(vals))
-						for j, v := range vals {
-							placeholders[j] = fmt.Sprintf("$%d", i)
+						for i, v := range vals {
+							placeholders[i] = "?"
 							args = append(args, v)
-							i++
 						}
-						clauses = append(clauses, fmt.Sprintf("%s NOT IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
+						clauses = append(clauses, translateColumn(field)+" NOT IN ("+strings.Join(placeholders, ", ")+")")
 					} else {
-						return "", nil, fmt.Errorf("postgres: $nin requires a slice")
+						return "", nil, fmt.Errorf("mysql: $nin requires a slice")
 					}
 				default:
-					return "", nil, fmt.Errorf("postgres: unsupported operator %q", op)
+					return "", nil, fmt.Errorf("mysql: unsupported operator %q", op)
 				}
 			}
 		default:
-			// Bare value: treat as equality.
-			clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
+			clauses = append(clauses, translateColumn(field)+" = ?")
 			args = append(args, constraint)
-			i++
 		}
 	}
 
@@ -418,14 +409,13 @@ func scanRows(rows *sql.Rows, total int64) ([]map[string]interface{}, int64, err
 	return result, total, nil
 }
 
-// quote wraps an identifier in double-quotes to prevent SQL injection and
-// handle reserved keywords.
+// quote wraps an identifier in backticks (MySQL identifier quoting).
 func quote(ident string) string {
-	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+	return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 }
 
 // translateColumn converts a dot-notated field (e.g. "profile.name") into
-// a PostgreSQL JSON path expression (e.g. "profile"->>'name').
+// a MySQL JSON path expression using the ->> operator (MySQL 5.7+).
 // If the field has no dots, it is simply quoted.
 func translateColumn(field string) string {
 	parts := strings.Split(field, ".")
@@ -433,39 +423,23 @@ func translateColumn(field string) string {
 		return quote(field)
 	}
 
-	// Start with the column name
-	expr := quote(parts[0])
+	// First part is the column name; remaining parts form the JSON path.
+	col := quote(parts[0])
+	path := "$." + strings.Join(parts[1:], ".")
+	path = strings.ReplaceAll(path, "'", "''")
 
-	// Iterate over path segments.
-	// Use -> for intermediate steps (returns jsonb)
-	// Use ->> for the final step (returns text)
-	for i, part := range parts[1:] {
-		// Use single quotes for JSON keys
-		key := strings.ReplaceAll(part, "'", "''")
-		if i == len(parts)-2 {
-			// Last part: ->>
-			expr = fmt.Sprintf("%s->>'%s'", expr, key)
-		} else {
-			// Intermediate part: ->
-			expr = fmt.Sprintf("%s->'%s'", expr, key)
-		}
-	}
-	return expr
+	// ->> returns unquoted text value (equivalent to JSON_UNQUOTE(JSON_EXTRACT(...)))
+	return fmt.Sprintf("%s->>'%s'", col, path)
 }
 
-// toSlice converts an interface{} to []interface{} if possible.
+// toSlice converts interface{} to []interface{} if possible.
 func toSlice(v interface{}) ([]interface{}, bool) {
-	switch s := v.(type) {
-	case []interface{}:
-		return s, true
-	default:
-		return nil, false
-	}
+	s, ok := v.([]interface{})
+	return s, ok
 }
 
 // fieldProjectionValue returns (true, nil) for inclusion (1), (false, nil) for
 // unknown values, and (false, error) when an exclusion value (0) is detected.
-// SQL drivers support inclusion-only projection.
 func fieldProjectionValue(val interface{}) (include bool, err error) {
 	var n float64
 	switch v := val.(type) {

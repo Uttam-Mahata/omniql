@@ -1,8 +1,10 @@
 // Package main is the OmniQL CLI entry-point.
 //
-// It provides a minimal REPL-style interface for ad-hoc OQL query execution
-// against any registered driver.  In production deployments the Core Engine
-// is typically embedded via the FFI layer rather than used directly.
+// It supports two modes of operation:
+//
+//  1. Flag mode: specify -driver, -dsn, and -query directly.
+//  2. Config mode: load an omniql.yaml file (via -config or the default
+//     omniql.yaml in the current directory) and specify only -query.
 package main
 
 import (
@@ -16,37 +18,43 @@ import (
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
 	drvmongo "github.com/Uttam-Mahata/omniql/pkg/drivers/mongo"
+	drvmysql "github.com/Uttam-Mahata/omniql/pkg/drivers/mysql"
 	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
 	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
-	_ "github.com/lib/pq" // Postgres database/sql driver
+	_ "github.com/go-sql-driver/mysql" // MySQL database/sql driver
+	_ "github.com/lib/pq"              // Postgres database/sql driver
 	"go.mongodb.org/mongo-driver/mongo"
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: omniql -driver <sqlite|postgres|mongo> -dsn <dsn> [-db <dbname>] -query '<OQL JSON>'")
+	fmt.Fprintln(os.Stderr, "Usage: omniql [options] -query '<OQL JSON>'")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -driver   Database driver: sqlite, postgres, or mongo")
+	fmt.Fprintln(os.Stderr, "Flag mode (single driver):")
+	fmt.Fprintln(os.Stderr, "  -driver   Database driver: sqlite, postgres, mongo, or mysql")
 	fmt.Fprintln(os.Stderr, "  -dsn      Connection string / file path / MongoDB URI")
 	fmt.Fprintln(os.Stderr, "  -db       Database name (required for mongo)")
 	fmt.Fprintln(os.Stderr, "  -query    JSON-encoded OQL query to execute")
 	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Config mode (omniql.yaml):")
+	fmt.Fprintln(os.Stderr, "  -config   Path to omniql.yaml (default: ./omniql.yaml)")
+	fmt.Fprintln(os.Stderr, "  -query    JSON-encoded OQL query to execute")
+	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Examples:")
 	fmt.Fprintln(os.Stderr, `  omniql -driver sqlite -dsn :memory: -query '{"target":"t","action":"FIND","filter":{}}'`)
-	fmt.Fprintln(os.Stderr, `  omniql -driver postgres -dsn "postgres://user:pass@localhost/mydb?sslmode=disable" -query '{"target":"users","action":"FIND","filter":{},"options":{"limit":10}}'`)
-	fmt.Fprintln(os.Stderr, `  omniql -driver mongo -dsn "mongodb://localhost:27017" -db mydb -query '{"target":"users","action":"FIND","filter":{}}'`)
+	fmt.Fprintln(os.Stderr, `  omniql -config omniql.yaml -query '{"target":"users","action":"FIND","filter":{}}'`)
 }
 
 func main() {
-	driverFlag := flag.String("driver", "", "Database driver: sqlite, postgres, mongo")
+	driverFlag := flag.String("driver", "", "Database driver: sqlite, postgres, mongo, mysql")
 	dsnFlag    := flag.String("dsn",    "", "Connection string / file path / MongoDB URI")
 	dbFlag     := flag.String("db",     "", "Database name (required for mongo)")
 	queryFlag  := flag.String("query",  "", "JSON-encoded OQL query to execute")
+	configFlag := flag.String("config", "omniql.yaml", "Path to omniql.yaml config file")
 	flag.Usage = usage
 	flag.Parse()
 
-	if *queryFlag == "" || *driverFlag == "" || *dsnFlag == "" {
+	if *queryFlag == "" {
 		usage()
 		os.Exit(1)
 	}
@@ -58,41 +66,29 @@ func main() {
 
 	engine := core.NewEngine()
 
-	switch *driverFlag {
-	case "sqlite":
-		drv, err := drvsqlite.New(*dsnFlag)
+	if *driverFlag != "" {
+		// Flag mode: single driver specified on the command line.
+		if *dsnFlag == "" {
+			log.Fatalf("-dsn is required when -driver is set")
+		}
+		if err := registerDriver(engine, *driverFlag, *dsnFlag, *dbFlag); err != nil {
+			log.Fatal(err)
+		}
+		engine.Route(query.Target, *driverFlag)
+	} else {
+		// Config mode: load omniql.yaml and register all drivers.
+		cfg, err := LoadConfig(*configFlag)
 		if err != nil {
-			log.Fatalf("sqlite: %v", err)
+			log.Fatalf("config: %v", err)
 		}
-		defer drv.Close()
-		engine.RegisterDriver(drv)
-		engine.Route(query.Target, drv.Name())
-
-	case "postgres":
-		db, err := sql.Open("postgres", *dsnFlag)
-		if err != nil {
-			log.Fatalf("postgres open: %v", err)
+		if cfg == nil {
+			fmt.Fprintf(os.Stderr, "No config file found at %q and no -driver flag provided.\n", *configFlag)
+			usage()
+			os.Exit(1)
 		}
-		defer db.Close()
-		drv := drvpostgres.New(db)
-		engine.RegisterDriver(drv)
-		engine.Route(query.Target, drv.Name())
-
-	case "mongo":
-		if *dbFlag == "" {
-			log.Fatalf("mongo driver requires -db <database name>")
+		if err := applyConfig(engine, cfg); err != nil {
+			log.Fatal(err)
 		}
-		client, err := mongo.Connect(context.Background(), mongoopts.Client().ApplyURI(*dsnFlag))
-		if err != nil {
-			log.Fatalf("mongo connect: %v", err)
-		}
-		defer client.Disconnect(context.Background())
-		drv := drvmongo.New(client, *dbFlag)
-		engine.RegisterDriver(drv)
-		engine.Route(query.Target, drv.Name())
-
-	default:
-		log.Fatalf("unknown driver %q: choose sqlite, postgres, or mongo", *driverFlag)
 	}
 
 	result, err := engine.Execute(context.Background(), query)
@@ -105,4 +101,61 @@ func main() {
 	if err := enc.Encode(result); err != nil {
 		log.Fatalf("failed to encode result: %v", err)
 	}
+}
+
+// registerDriver creates and registers a single driver by type name.
+func registerDriver(engine *core.Engine, driverType, dsn, db string) error {
+	switch driverType {
+	case "sqlite":
+		drv, err := drvsqlite.New(dsn)
+		if err != nil {
+			return fmt.Errorf("sqlite: %w", err)
+		}
+		engine.RegisterDriver(drv)
+
+	case "postgres":
+		sqlDB, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return fmt.Errorf("postgres open: %w", err)
+		}
+		engine.RegisterDriver(drvpostgres.New(sqlDB))
+
+	case "mongo":
+		if db == "" {
+			return fmt.Errorf("mongo driver requires -db <database name>")
+		}
+		client, err := mongo.Connect(context.Background(), mongoopts.Client().ApplyURI(dsn))
+		if err != nil {
+			return fmt.Errorf("mongo connect: %w", err)
+		}
+		engine.RegisterDriver(drvmongo.New(client, db))
+
+	case "mysql":
+		drv, err := drvmysql.New(dsn)
+		if err != nil {
+			return fmt.Errorf("mysql: %w", err)
+		}
+		engine.RegisterDriver(drv)
+
+	default:
+		return fmt.Errorf("unknown driver %q: choose sqlite, postgres, mongo, or mysql", driverType)
+	}
+	return nil
+}
+
+// applyConfig registers all drivers and routes declared in cfg.
+func applyConfig(engine *core.Engine, cfg *Config) error {
+	for name, dc := range cfg.Drivers {
+		if err := registerDriver(engine, dc.Type, dc.DSN, dc.DB); err != nil {
+			return fmt.Errorf("driver %q: %w", name, err)
+		}
+	}
+	for target, driverKey := range cfg.Routes {
+		dc, ok := cfg.Drivers[driverKey]
+		if !ok {
+			return fmt.Errorf("route %q references unknown driver %q", target, driverKey)
+		}
+		engine.Route(target, dc.Type)
+	}
+	return nil
 }

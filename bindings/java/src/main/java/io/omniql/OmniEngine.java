@@ -142,6 +142,23 @@ public class OmniEngine implements AutoCloseable {
         return extractDriverName(json, "mongo");
     }
 
+    /**
+     * Inserts multiple documents in a single BATCH_INSERT operation.
+     *
+     * @param target the collection or table name
+     * @param docs   the list of documents to insert
+     * @return OmniResult with the insertion outcome
+     */
+    public OmniResult batchInsert(String target, List<Map<String, Object>> docs) {
+        Map<String, Object> queryMap = new HashMap<>();
+        queryMap.put("target", target);
+        queryMap.put("action", "BATCH_INSERT");
+        queryMap.put("documents", docs);
+        String json = gson.toJson(queryMap);
+        String responseJson = nativeExecute(handle, json);
+        return gson.fromJson(responseJson, OmniResult.class);
+    }
+
     private String extractDriverName(String json, String fallback) {
         // Simple extraction without a full JSON parse dependency.
         // json is of the form {"driver":"sqlite"} or a JSON error.
@@ -207,6 +224,10 @@ public class OmniEngine implements AutoCloseable {
             this.query.action = "COUNT";
             this.query.filter = filter;
             return this;
+        }
+
+        public OmniResult batchInsert(List<Map<String, Object>> docs) {
+            return engine.batchInsert(this.query.target, docs);
         }
 
         public QueryBuilder limit(int n) {
