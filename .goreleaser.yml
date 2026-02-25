@@ -1,0 +1,120 @@
+# GoReleaser configuration for OmniQL CLI distribution.
+#
+# Builds the omniql CLI binary for Linux, macOS, and Windows across amd64/arm64,
+# packages native artifacts (archives, .deb, .rpm), and publishes to Homebrew and Scoop.
+#
+# Usage:
+#   goreleaser release --snapshot --clean   # dry-run / local snapshot
+#   goreleaser release --clean              # full release (requires GITHUB_TOKEN)
+#
+# Prerequisites:
+#   - GITHUB_TOKEN env var must be set with repo write permission.
+#   - For Homebrew: a tap repo (homebrew-omniql) must exist at the same GitHub org/user.
+#   - For Scoop: a scoop-omniql bucket repo must exist at the same GitHub org/user.
+version: 2
+
+project_name: omniql
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: omniql
+    main: ./cmd/omniql
+    binary: omniql
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows arm64 is uncommon; skip to keep matrix small.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: default
+    builds:
+      - omniql
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge remote-tracking branch
+
+release:
+  github:
+    owner: Uttam-Mahata
+    name: omniql
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+
+nfpms:
+  - id: omniql-packages
+    package_name: omniql
+    builds:
+      - omniql
+    vendor: OmniQL
+    homepage: https://github.com/Uttam-Mahata/omniql
+    maintainer: Uttam Mahata
+    description: Unified query routing layer — one query API for any database.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/omniql/LICENSE
+      - src: ./README.md
+        dst: /usr/share/doc/omniql/README.md
+    bindir: /usr/bin
+
+brews:
+  - name: omniql
+    ids:
+      - default
+    tap:
+      owner: Uttam-Mahata
+      name: homebrew-omniql
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/Uttam-Mahata/omniql
+    description: Unified query routing layer — one query API for any database.
+    license: MIT
+    test: |
+      system "#{bin}/omniql", "--help"
+
+scoops:
+  - name: omniql
+    ids:
+      - default
+    repository:
+      owner: Uttam-Mahata
+      name: scoop-omniql
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: https://github.com/Uttam-Mahata/omniql
+    description: Unified query routing layer — one query API for any database.
+    license: MIT

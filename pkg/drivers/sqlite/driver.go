@@ -123,6 +123,9 @@ func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]in
 
 	if query.Options.Limit > 0 {
 		selectSQL += fmt.Sprintf(" LIMIT %d", query.Options.Limit)
+	} else if query.Options.Skip > 0 {
+		// SQLite requires LIMIT before OFFSET; use -1 for unlimited.
+		selectSQL += " LIMIT -1"
 	}
 	if query.Options.Skip > 0 {
 		selectSQL += fmt.Sprintf(" OFFSET %d", query.Options.Skip)
@@ -181,12 +184,18 @@ func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[stri
 	}
 	defer tx.Rollback()
 
-	// Assuming all documents have the same keys as the first one for simplicity in bulk insert stmt.
-	// For production, you'd want to handle heterogeneous keys or use multiple statements.
 	first := docs[0]
-	cols := make([]string, 0, len(first))
-	placeholders := make([]string, 0, len(first))
+	// Sort column names to guarantee consistent ordering between the prepared
+	// statement and the value slices for each row.
+	colOrder := make([]string, 0, len(first))
 	for col := range first {
+		colOrder = append(colOrder, col)
+	}
+	sort.Strings(colOrder)
+
+	cols := make([]string, 0, len(colOrder))
+	placeholders := make([]string, 0, len(colOrder))
+	for _, col := range colOrder {
 		cols = append(cols, quote(col))
 		placeholders = append(placeholders, "?")
 	}
@@ -204,8 +213,8 @@ func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[stri
 	defer stmt.Close()
 
 	for _, doc := range docs {
-		vals := make([]interface{}, 0, len(first))
-		for col := range first {
+		vals := make([]interface{}, 0, len(colOrder))
+		for _, col := range colOrder {
 			vals = append(vals, doc[col])
 		}
 		if _, err := stmt.ExecContext(ctx, vals...); err != nil {
