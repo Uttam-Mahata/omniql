@@ -39,8 +39,6 @@ builds:
 
 archives:
   - id: default
-    build_ids:
-      - omniql
     formats:
       - tar.gz
     format_overrides:
@@ -76,8 +74,6 @@ release:
 nfpms:
   - id: omniql-packages
     package_name: omniql
-    build_ids:
-      - omniql
     vendor: OmniQL
     homepage: https://github.com/Uttam-Mahata/omniql
     maintainer: Uttam Mahata
