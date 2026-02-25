@@ -68,6 +68,10 @@ _ffi.cdef(
     char * OmniQL_RegisterSQLiteDriver(int handle, const char *dsn);
     char * OmniQL_RegisterPostgresDriver(int handle, const char *connStr);
     char * OmniQL_RegisterMongoDriver(int handle, const char *uri, const char *dbName);
+    char * OmniQL_RegisterMySQLDriver(int handle, const char *dsn);
+    char * OmniQL_RegisterSQLServerDriver(int handle, const char *dsn);
+    char * OmniQL_RegisterRedisDriver(int handle, const char *url);
+    char * OmniQL_RegisterElasticsearchDriver(int handle, const char *addr);
     void   OmniQL_Free(char *ptr);
 """
 )
@@ -232,6 +236,46 @@ class OmniEngine:
         finally:
             _lib.OmniQL_Free(raw)
 
+    def register_mysql_driver_sync(self, dsn: str) -> str:
+        """Register a MySQL driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterMySQLDriver(self._handle, dsn.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "mysql")
+        finally:
+            _lib.OmniQL_Free(raw)
+
+    def register_sqlserver_driver_sync(self, dsn: str) -> str:
+        """Register a SQL Server driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterSQLServerDriver(self._handle, dsn.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "sqlserver")
+        finally:
+            _lib.OmniQL_Free(raw)
+
+    def register_redis_driver_sync(self, url: str) -> str:
+        """Register a Redis driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterRedisDriver(self._handle, url.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "redis")
+        finally:
+            _lib.OmniQL_Free(raw)
+
+    def register_elasticsearch_driver_sync(self, addr: str) -> str:
+        """Register an Elasticsearch driver synchronously.  Returns the driver name."""
+        with self._lock:
+            raw = _lib.OmniQL_RegisterElasticsearchDriver(self._handle, addr.encode())
+        try:
+            result = json.loads(_ffi.string(raw).decode())
+            return result.get("driver", "elasticsearch")
+        finally:
+            _lib.OmniQL_Free(raw)
+
     # ------------------------------------------------------------------
     # Asyncio API
     # ------------------------------------------------------------------
@@ -272,6 +316,26 @@ class OmniEngine:
         loop = self._get_loop()
         return await loop.run_in_executor(None, self.register_mongo_driver_sync, uri, db_name)
 
+    async def register_mysql_driver(self, dsn: str) -> str:
+        """Register a MySQL driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_mysql_driver_sync, dsn)
+
+    async def register_sqlserver_driver(self, dsn: str) -> str:
+        """Register a SQL Server driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_sqlserver_driver_sync, dsn)
+
+    async def register_redis_driver(self, url: str) -> str:
+        """Register a Redis driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_redis_driver_sync, url)
+
+    async def register_elasticsearch_driver(self, addr: str) -> str:
+        """Register an Elasticsearch driver asynchronously.  Returns the driver name."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.register_elasticsearch_driver_sync, addr)
+
     def batch_insert_sync(self, target: str, docs: List[Dict[str, Any]]) -> OmniResult:
         """Insert multiple documents synchronously via BATCH_INSERT action."""
         query = Query(
@@ -293,3 +357,113 @@ class OmniEngine:
         """Insert multiple documents asynchronously via BATCH_INSERT action."""
         loop = self._get_loop()
         return await loop.run_in_executor(None, self.batch_insert_sync, target, docs)
+
+    # ------------------------------------------------------------------
+    # Terminal convenience methods (sync)
+    # ------------------------------------------------------------------
+
+    def find_many_sync(
+        self,
+        target: str,
+        filter: Optional[Dict[str, Any]] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all matching documents synchronously."""
+        opts = QueryOptions(**options) if options else QueryOptions()
+        result = self.execute_sync(Query(target=target, action="FIND", filter=filter or {}, options=opts))
+        if result.error:
+            raise RuntimeError(f"find_many error: {result.error.code}: {result.error.message}")
+        return result.data
+
+    def find_first_sync(
+        self,
+        target: str,
+        filter: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the first matching document synchronously, or None."""
+        opts = QueryOptions(limit=1)
+        result = self.execute_sync(Query(target=target, action="FIND", filter=filter or {}, options=opts))
+        if result.error:
+            raise RuntimeError(f"find_first error: {result.error.code}: {result.error.message}")
+        return result.data[0] if result.data else None
+
+    def count_sync(self, target: str, filter: Optional[Dict[str, Any]] = None) -> int:
+        """Return the count of matching documents synchronously."""
+        result = self.execute_sync(Query(target=target, action="COUNT", filter=filter or {}))
+        if result.error:
+            raise RuntimeError(f"count error: {result.error.code}: {result.error.message}")
+        return int(result.meta.total)
+
+    def insert_one_sync(self, target: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a single document synchronously and return the result row."""
+        result = self.execute_sync(Query(target=target, action="INSERT", document=doc))
+        if result.error:
+            raise RuntimeError(f"insert_one error: {result.error.code}: {result.error.message}")
+        return result.data[0] if result.data else {}
+
+    def update_many_sync(
+        self,
+        target: str,
+        filter: Dict[str, Any],
+        update: Dict[str, Any],
+    ) -> OmniResult:
+        """Update matching documents synchronously."""
+        result = self.execute_sync(Query(target=target, action="UPDATE", filter=filter, document=update))
+        if result.error:
+            raise RuntimeError(f"update_many error: {result.error.code}: {result.error.message}")
+        return result
+
+    def delete_many_sync(self, target: str, filter: Dict[str, Any]) -> OmniResult:
+        """Delete matching documents synchronously."""
+        result = self.execute_sync(Query(target=target, action="DELETE", filter=filter))
+        if result.error:
+            raise RuntimeError(f"delete_many error: {result.error.code}: {result.error.message}")
+        return result
+
+    # ------------------------------------------------------------------
+    # Terminal convenience methods (async)
+    # ------------------------------------------------------------------
+
+    async def find_many(
+        self,
+        target: str,
+        filter: Optional[Dict[str, Any]] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all matching documents asynchronously."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.find_many_sync, target, filter, options)
+
+    async def find_first(
+        self,
+        target: str,
+        filter: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the first matching document asynchronously, or None."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.find_first_sync, target, filter)
+
+    async def count(self, target: str, filter: Optional[Dict[str, Any]] = None) -> int:
+        """Return the count of matching documents asynchronously."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.count_sync, target, filter)
+
+    async def insert_one(self, target: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert a single document asynchronously."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.insert_one_sync, target, doc)
+
+    async def update_many(
+        self,
+        target: str,
+        filter: Dict[str, Any],
+        update: Dict[str, Any],
+    ) -> OmniResult:
+        """Update matching documents asynchronously."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.update_many_sync, target, filter, update)
+
+    async def delete_many(self, target: str, filter: Dict[str, Any]) -> OmniResult:
+        """Delete matching documents asynchronously."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.delete_many_sync, target, filter)

@@ -51,6 +51,10 @@ public class OmniEngine implements AutoCloseable {
     private static native String nativeRegisterSQLiteDriver(int handle, String dsn);
     private static native String nativeRegisterPostgresDriver(int handle, String connStr);
     private static native String nativeRegisterMongoDriver(int handle, String uri, String dbName);
+    private static native String nativeRegisterMySQLDriver(int handle, String dsn);
+    private static native String nativeRegisterSQLServerDriver(int handle, String dsn);
+    private static native String nativeRegisterRedisDriver(int handle, String url);
+    private static native String nativeRegisterElasticsearchDriver(int handle, String addr);
 
     // -------------------------------------------------------------------------
     // Java API
@@ -143,6 +147,54 @@ public class OmniEngine implements AutoCloseable {
     }
 
     /**
+     * Registers a MySQL driver using the given DSN.
+     * e.g. "user:password@tcp(host:port)/dbname?parseTime=true"
+     *
+     * @param dsn the MySQL DSN
+     * @return the driver name ("mysql") to use with {@link #route}
+     */
+    public String registerMySQLDriver(String dsn) {
+        String json = nativeRegisterMySQLDriver(handle, dsn);
+        return extractDriverName(json, "mysql");
+    }
+
+    /**
+     * Registers a SQL Server driver using the given DSN.
+     * e.g. "sqlserver://sa:Pass@localhost:1433?database=test"
+     *
+     * @param dsn the SQL Server connection string
+     * @return the driver name ("sqlserver") to use with {@link #route}
+     */
+    public String registerSQLServerDriver(String dsn) {
+        String json = nativeRegisterSQLServerDriver(handle, dsn);
+        return extractDriverName(json, "sqlserver");
+    }
+
+    /**
+     * Registers a Redis driver using the given URL.
+     * e.g. "redis://localhost:6379/0"
+     *
+     * @param url the Redis URL
+     * @return the driver name ("redis") to use with {@link #route}
+     */
+    public String registerRedisDriver(String url) {
+        String json = nativeRegisterRedisDriver(handle, url);
+        return extractDriverName(json, "redis");
+    }
+
+    /**
+     * Registers an Elasticsearch driver using the given address.
+     * e.g. "http://localhost:9200"
+     *
+     * @param addr the Elasticsearch node address
+     * @return the driver name ("elasticsearch") to use with {@link #route}
+     */
+    public String registerElasticsearchDriver(String addr) {
+        String json = nativeRegisterElasticsearchDriver(handle, addr);
+        return extractDriverName(json, "elasticsearch");
+    }
+
+    /**
      * Inserts multiple documents in a single BATCH_INSERT operation.
      *
      * @param target the collection or table name
@@ -157,6 +209,111 @@ public class OmniEngine implements AutoCloseable {
         String json = gson.toJson(queryMap);
         String responseJson = nativeExecute(handle, json);
         return gson.fromJson(responseJson, OmniResult.class);
+    }
+
+    // -------------------------------------------------------------------------
+    // Terminal convenience methods
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns all documents matching the given filter.
+     *
+     * @param target the collection or table name
+     * @param filter the OQL filter map (may be null for no filter)
+     * @return list of matching documents
+     */
+    public java.util.List<Map<String, Object>> findMany(String target, Map<String, Object> filter) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "FIND";
+        q.filter = filter != null ? filter : new HashMap<>();
+        q.options = new OQLQuery.Options();
+        return execute(q).data;
+    }
+
+    /**
+     * Returns the first document matching the filter, or {@code null} if none.
+     *
+     * @param target the collection or table name
+     * @param filter the OQL filter map (may be null)
+     * @return the first matching document, or null
+     */
+    public Map<String, Object> findFirst(String target, Map<String, Object> filter) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "FIND";
+        q.filter = filter != null ? filter : new HashMap<>();
+        q.options = new OQLQuery.Options();
+        q.options.limit = 1;
+        java.util.List<Map<String, Object>> data = execute(q).data;
+        return data != null && !data.isEmpty() ? data.get(0) : null;
+    }
+
+    /**
+     * Returns the count of documents matching the filter.
+     *
+     * @param target the collection or table name
+     * @param filter the OQL filter map (may be null)
+     * @return the count
+     */
+    public long count(String target, Map<String, Object> filter) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "COUNT";
+        q.filter = filter != null ? filter : new HashMap<>();
+        q.options = new OQLQuery.Options();
+        OmniResult result = execute(q);
+        return result.meta != null ? result.meta.total : 0L;
+    }
+
+    /**
+     * Inserts a single document and returns the result row.
+     *
+     * @param target   the collection or table name
+     * @param document the document to insert
+     * @return the OmniResult from the INSERT
+     */
+    public OmniResult insertOne(String target, Map<String, Object> document) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "INSERT";
+        q.document = document;
+        q.options = new OQLQuery.Options();
+        return execute(q);
+    }
+
+    /**
+     * Updates all documents matching the filter with the given update fields.
+     *
+     * @param target   the collection or table name
+     * @param filter   the OQL filter (must be non-empty)
+     * @param update   the fields to update
+     * @return the OmniResult
+     */
+    public OmniResult updateMany(String target, Map<String, Object> filter, Map<String, Object> update) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "UPDATE";
+        q.filter = filter;
+        q.document = update;
+        q.options = new OQLQuery.Options();
+        return execute(q);
+    }
+
+    /**
+     * Deletes all documents matching the filter.
+     *
+     * @param target the collection or table name
+     * @param filter the OQL filter (must be non-empty)
+     * @return the OmniResult
+     */
+    public OmniResult deleteMany(String target, Map<String, Object> filter) {
+        OQLQuery q = new OQLQuery();
+        q.target = target;
+        q.action = "DELETE";
+        q.filter = filter;
+        q.options = new OQLQuery.Options();
+        return execute(q);
     }
 
     private String extractDriverName(String json, String fallback) {

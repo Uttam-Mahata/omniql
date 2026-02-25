@@ -17,22 +17,27 @@ import (
 	"os"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	drvels "github.com/Uttam-Mahata/omniql/pkg/drivers/elasticsearch"
 	drvmongo "github.com/Uttam-Mahata/omniql/pkg/drivers/mongo"
 	drvmysql "github.com/Uttam-Mahata/omniql/pkg/drivers/mysql"
 	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
+	drvredis "github.com/Uttam-Mahata/omniql/pkg/drivers/redis"
 	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
-	_ "github.com/go-sql-driver/mysql" // MySQL database/sql driver
-	_ "github.com/lib/pq"              // Postgres database/sql driver
+	drvsqlserver "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlserver"
+	_ "github.com/go-sql-driver/mysql"  // MySQL database/sql driver
+	_ "github.com/lib/pq"               // Postgres database/sql driver
+	_ "github.com/microsoft/go-mssqldb" // SQL Server database/sql driver
 	"go.mongodb.org/mongo-driver/mongo"
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: omniql [options] -query '<OQL JSON>'")
+	fmt.Fprintln(os.Stderr, "       omniql shell [-config omniql.yaml]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Flag mode (single driver):")
-	fmt.Fprintln(os.Stderr, "  -driver   Database driver: sqlite, postgres, mongo, or mysql")
-	fmt.Fprintln(os.Stderr, "  -dsn      Connection string / file path / MongoDB URI")
+	fmt.Fprintln(os.Stderr, "  -driver   Database driver: sqlite, postgres, mongo, mysql, sqlserver, redis, or elasticsearch")
+	fmt.Fprintln(os.Stderr, "  -dsn      Connection string / file path / MongoDB URI / Redis URL / Elasticsearch address")
 	fmt.Fprintln(os.Stderr, "  -db       Database name (required for mongo)")
 	fmt.Fprintln(os.Stderr, "  -query    JSON-encoded OQL query to execute")
 	fmt.Fprintln(os.Stderr, "")
@@ -40,13 +45,25 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  -config   Path to omniql.yaml (default: ./omniql.yaml)")
 	fmt.Fprintln(os.Stderr, "  -query    JSON-encoded OQL query to execute")
 	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Shell mode (interactive REPL):")
+	fmt.Fprintln(os.Stderr, "  omniql shell [-config omniql.yaml]")
+	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Examples:")
 	fmt.Fprintln(os.Stderr, `  omniql -driver sqlite -dsn :memory: -query '{"target":"t","action":"FIND","filter":{}}'`)
 	fmt.Fprintln(os.Stderr, `  omniql -config omniql.yaml -query '{"target":"users","action":"FIND","filter":{}}'`)
+	fmt.Fprintln(os.Stderr, `  omniql shell`)
+	fmt.Fprintln(os.Stderr, `  omniql shell -config omniql.yaml`)
 }
 
 func main() {
-	driverFlag := flag.String("driver", "", "Database driver: sqlite, postgres, mongo, mysql")
+	// Detect "shell" subcommand before flag.Parse so it doesn't conflict.
+	if len(os.Args) >= 2 && os.Args[1] == "shell" {
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		runShellMode()
+		return
+	}
+
+	driverFlag := flag.String("driver", "", "Database driver: sqlite, postgres, mongo, mysql, sqlserver, redis, elasticsearch")
 	dsnFlag    := flag.String("dsn",    "", "Connection string / file path / MongoDB URI")
 	dbFlag     := flag.String("db",     "", "Database name (required for mongo)")
 	queryFlag  := flag.String("query",  "", "JSON-encoded OQL query to execute")
@@ -137,10 +154,52 @@ func registerDriver(engine *core.Engine, driverType, dsn, db string) error {
 		}
 		engine.RegisterDriver(drv)
 
+	case "sqlserver":
+		drv, err := drvsqlserver.New(dsn)
+		if err != nil {
+			return fmt.Errorf("sqlserver: %w", err)
+		}
+		engine.RegisterDriver(drv)
+
+	case "redis":
+		drv, err := drvredis.New(dsn)
+		if err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
+		engine.RegisterDriver(drv)
+
+	case "elasticsearch":
+		drv, err := drvels.New(dsn)
+		if err != nil {
+			return fmt.Errorf("elasticsearch: %w", err)
+		}
+		engine.RegisterDriver(drv)
+
 	default:
-		return fmt.Errorf("unknown driver %q: choose sqlite, postgres, mongo, or mysql", driverType)
+		return fmt.Errorf("unknown driver %q: choose sqlite, postgres, mongo, mysql, sqlserver, redis, or elasticsearch", driverType)
 	}
 	return nil
+}
+
+// runShellMode loads config (if present) and starts the interactive REPL.
+func runShellMode() {
+	configFlag := flag.String("config", "omniql.yaml", "Path to omniql.yaml config file")
+	flag.Usage = usage
+	flag.Parse()
+
+	engine := core.NewEngine()
+
+	cfg, err := LoadConfig(*configFlag)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if cfg != nil {
+		if err := applyConfig(engine, cfg); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	runREPL(engine)
 }
 
 // applyConfig registers all drivers and routes declared in cfg.

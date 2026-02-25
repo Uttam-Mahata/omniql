@@ -70,6 +70,18 @@ namespace OmniQL
         [DllImport(LibName, EntryPoint = "OmniQL_RegisterMongoDriver", CharSet = CharSet.Ansi)]
         internal static extern IntPtr RegisterMongoDriver(int handle, string uri, string dbName);
 
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterMySQLDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterMySQLDriver(int handle, string dsn);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterSQLServerDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterSQLServerDriver(int handle, string dsn);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterRedisDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterRedisDriver(int handle, string url);
+
+        [DllImport(LibName, EntryPoint = "OmniQL_RegisterElasticsearchDriver", CharSet = CharSet.Ansi)]
+        internal static extern IntPtr RegisterElasticsearchDriver(int handle, string addr);
+
         [DllImport(LibName, EntryPoint = "OmniQL_Free")]
         internal static extern void Free(IntPtr ptr);
     }
@@ -212,6 +224,70 @@ namespace OmniQL
         }
 
         /// <summary>
+        /// Registers the MySQL driver using the given DSN.
+        /// Returns the driver name ("mysql") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterMySQLDriver(string dsn)
+        {
+            IntPtr ptr = Native.RegisterMySQLDriver(_handle, dsn);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "mysql";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Registers the SQL Server driver using the given DSN.
+        /// Returns the driver name ("sqlserver") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterSQLServerDriver(string dsn)
+        {
+            IntPtr ptr = Native.RegisterSQLServerDriver(_handle, dsn);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "sqlserver";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Registers the Redis driver using the given URL.
+        /// Returns the driver name ("redis") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterRedisDriver(string url)
+        {
+            IntPtr ptr = Native.RegisterRedisDriver(_handle, url);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "redis";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
+        /// Registers the Elasticsearch driver using the given address.
+        /// Returns the driver name ("elasticsearch") to use with <see cref="Route"/>.
+        /// </summary>
+        public string RegisterElasticsearchDriver(string addr)
+        {
+            IntPtr ptr = Native.RegisterElasticsearchDriver(_handle, addr);
+            try
+            {
+                string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                var result = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                return result != null && result.TryGetValue("driver", out var name) ? name : "elasticsearch";
+            }
+            finally { Native.Free(ptr); }
+        }
+
+        /// <summary>
         /// Binds a collection/table <paramref name="target"/> name to a <paramref name="driverName"/>
         /// so the engine routes queries for that target to the correct driver.
         /// </summary>
@@ -246,6 +322,64 @@ namespace OmniQL
                     Native.Free(ptr);
                 }
             });
+        }
+
+        // -------------------------------------------------------------------------
+        // Terminal convenience methods
+        // -------------------------------------------------------------------------
+
+        /// <summary>Returns all documents matching the given filter asynchronously.</summary>
+        public Task<List<Dictionary<string, JsonElement>>> FindManyAsync(
+            string target,
+            Dictionary<string, object>? filter = null)
+        {
+            var q = new OQLQuery { Target = target, Action = "FIND", Filter = filter };
+            return ExecuteAsync(q).ContinueWith(t => t.Result.Data);
+        }
+
+        /// <summary>Returns the first matching document asynchronously, or null.</summary>
+        public Task<Dictionary<string, JsonElement>?> FindFirstAsync(
+            string target,
+            Dictionary<string, object>? filter = null)
+        {
+            var q = new OQLQuery { Target = target, Action = "FIND", Filter = filter, Options = new OQLOptions { Limit = 1 } };
+            return ExecuteAsync(q).ContinueWith(t =>
+                t.Result.Data.Count > 0 ? t.Result.Data[0] : (Dictionary<string, JsonElement>?)null);
+        }
+
+        /// <summary>Returns the count of matching documents asynchronously.</summary>
+        public Task<long> CountAsync(
+            string target,
+            Dictionary<string, object>? filter = null)
+        {
+            var q = new OQLQuery { Target = target, Action = "COUNT", Filter = filter };
+            return ExecuteAsync(q).ContinueWith(t => t.Result.Meta.Total);
+        }
+
+        /// <summary>Inserts a single document asynchronously.</summary>
+        public Task<OmniResult> InsertOneAsync(string target, Dictionary<string, object> document)
+        {
+            var q = new OQLQuery { Target = target, Action = "INSERT", Document = document };
+            return ExecuteAsync(q);
+        }
+
+        /// <summary>Updates all documents matching the filter asynchronously.</summary>
+        public Task<OmniResult> UpdateManyAsync(
+            string target,
+            Dictionary<string, object> filter,
+            Dictionary<string, object> update)
+        {
+            var q = new OQLQuery { Target = target, Action = "UPDATE", Filter = filter, Document = update };
+            return ExecuteAsync(q);
+        }
+
+        /// <summary>Deletes all documents matching the filter asynchronously.</summary>
+        public Task<OmniResult> DeleteManyAsync(
+            string target,
+            Dictionary<string, object> filter)
+        {
+            var q = new OQLQuery { Target = target, Action = "DELETE", Filter = filter };
+            return ExecuteAsync(q);
         }
 
         /// <summary>Returns a fluent query builder for the given target.</summary>

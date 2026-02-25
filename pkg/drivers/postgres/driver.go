@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	"github.com/Uttam-Mahata/omniql/pkg/drivers/sqlutil"
 )
 
 const driverName = "postgres"
@@ -54,7 +55,7 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 
 // find builds and executes a SELECT statement.
 func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args, err := buildWhere(query.Filter)
+	where, args, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Dollar, quote, translateColumn, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -226,7 +227,7 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 		i++
 	}
 
-	where, whereArgs, err := buildWhereFrom(query.Filter, i)
+	where, whereArgs, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Dollar, quote, translateColumn, i)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -250,7 +251,7 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 	if len(query.Filter) == 0 {
 		return nil, 0, fmt.Errorf("postgres: DELETE requires a non-empty filter to prevent accidental bulk deletes")
 	}
-	where, args, err := buildWhere(query.Filter)
+	where, args, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Dollar, quote, translateColumn, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -266,127 +267,6 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 	}
 	affected, _ := result.RowsAffected()
 	return []map[string]interface{}{}, affected, nil
-}
-
-// buildWhere translates an OQL Filter into a parameterised SQL WHERE clause.
-// Parameters are numbered from $1.
-func buildWhere(filter core.Filter) (string, []interface{}, error) {
-	return buildWhereFrom(filter, 1)
-}
-
-// buildWhereFrom is like buildWhere but starts parameter numbering at startIdx.
-func buildWhereFrom(filter core.Filter, startIdx int) (string, []interface{}, error) {
-	if len(filter) == 0 {
-		return "", nil, nil
-	}
-
-	clauses := make([]string, 0, len(filter))
-	args := make([]interface{}, 0, len(filter))
-	i := startIdx
-
-	for field, constraint := range filter {
-		if field == "$or" || field == "$and" {
-			list, ok := toSlice(constraint)
-			if !ok {
-				return "", nil, fmt.Errorf("postgres: %s requires a slice", field)
-			}
-			subClauses := make([]string, 0, len(list))
-			for _, item := range list {
-				subFilter, ok := item.(map[string]interface{})
-				if !ok {
-					return "", nil, fmt.Errorf("postgres: %s elements must be objects", field)
-				}
-				subWhere, subArgs, err := buildWhereFrom(subFilter, i)
-				if err != nil {
-					return "", nil, err
-				}
-				if subWhere != "" {
-					subClauses = append(subClauses, "("+subWhere+")")
-					args = append(args, subArgs...)
-					i += len(subArgs)
-				}
-			}
-			op := " OR "
-			if field == "$and" {
-				op = " AND "
-			}
-			if len(subClauses) > 0 {
-				clauses = append(clauses, "("+strings.Join(subClauses, op)+")")
-			}
-			continue
-		}
-
-		switch c := constraint.(type) {
-		case map[string]interface{}:
-			for op, val := range c {
-				switch op {
-				case "$eq":
-					clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$ne":
-					clauses = append(clauses, fmt.Sprintf("%s != $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$lt":
-					clauses = append(clauses, fmt.Sprintf("%s < $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$lte":
-					clauses = append(clauses, fmt.Sprintf("%s <= $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$gt":
-					clauses = append(clauses, fmt.Sprintf("%s > $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$gte":
-					clauses = append(clauses, fmt.Sprintf("%s >= $%d", translateColumn(field), i))
-					args = append(args, val)
-					i++
-				case "$in":
-					if vals, ok := toSlice(val); ok {
-						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("postgres: $in requires non-empty slice")
-						}
-						placeholders := make([]string, len(vals))
-						for j, v := range vals {
-							placeholders[j] = fmt.Sprintf("$%d", i)
-							args = append(args, v)
-							i++
-						}
-						clauses = append(clauses, fmt.Sprintf("%s IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
-					} else {
-						return "", nil, fmt.Errorf("postgres: $in requires a slice")
-					}
-				case "$nin":
-					if vals, ok := toSlice(val); ok {
-						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("postgres: $nin requires non-empty slice")
-						}
-						placeholders := make([]string, len(vals))
-						for j, v := range vals {
-							placeholders[j] = fmt.Sprintf("$%d", i)
-							args = append(args, v)
-							i++
-						}
-						clauses = append(clauses, fmt.Sprintf("%s NOT IN (%s)", translateColumn(field), strings.Join(placeholders, ", ")))
-					} else {
-						return "", nil, fmt.Errorf("postgres: $nin requires a slice")
-					}
-				default:
-					return "", nil, fmt.Errorf("postgres: unsupported operator %q", op)
-				}
-			}
-		default:
-			// Bare value: treat as equality.
-			clauses = append(clauses, fmt.Sprintf("%s = $%d", translateColumn(field), i))
-			args = append(args, constraint)
-			i++
-		}
-	}
-
-	return strings.Join(clauses, " AND "), args, nil
 }
 
 // scanRows converts *sql.Rows into a slice of generic maps.
@@ -416,6 +296,12 @@ func scanRows(rows *sql.Rows, total int64) ([]map[string]interface{}, int64, err
 		return nil, 0, err
 	}
 	return result, total, nil
+}
+
+// buildWhere is a package-level wrapper for internal tests.
+func buildWhere(filter core.Filter) (string, []interface{}, error) {
+	clause, args, _, err := sqlutil.BuildWhere(filter, sqlutil.Dollar, quote, translateColumn, 1)
+	return clause, args, err
 }
 
 // quote wraps an identifier in double-quotes to prevent SQL injection and
@@ -451,16 +337,6 @@ func translateColumn(field string) string {
 		}
 	}
 	return expr
-}
-
-// toSlice converts an interface{} to []interface{} if possible.
-func toSlice(v interface{}) ([]interface{}, bool) {
-	switch s := v.(type) {
-	case []interface{}:
-		return s, true
-	default:
-		return nil, false
-	}
 }
 
 // fieldProjectionValue returns (true, nil) for inclusion (1), (false, nil) for
