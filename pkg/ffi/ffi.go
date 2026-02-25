@@ -21,8 +21,10 @@ import (
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
 	drvmongo "github.com/Uttam-Mahata/omniql/pkg/drivers/mongo"
+	drvmysql "github.com/Uttam-Mahata/omniql/pkg/drivers/mysql"
 	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
 	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
+	_ "github.com/go-sql-driver/mysql"            // MySQL database/sql driver
 	_ "github.com/lib/pq"                         // Postgres database/sql driver
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -195,6 +197,28 @@ func OmniQL_RegisterMongoDriver(handle C.int, uri *C.char, dbName *C.char) *C.ch
 		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("mongo connect: %v", err))
 	}
 	drv := drvmongo.New(client, C.GoString(dbName))
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterMySQLDriver opens a MySQL connection using the provided DSN
+// (e.g. "user:password@tcp(host:port)/dbname?parseTime=true"), registers the
+// driver with the engine, and returns {"driver":"mysql"} on success.
+//
+// Returns JSON {"driver":"mysql"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterMySQLDriver
+func OmniQL_RegisterMySQLDriver(handle C.int, dsn *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	drv, err := drvmysql.New(C.GoString(dsn))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("mysql: %v", err))
+	}
 	engine.RegisterDriver(drv)
 	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
 	return C.CString(string(data))

@@ -131,12 +131,45 @@ The publish workflow (`.github/workflows/publish.yml`) runs as follows:
 ```
 get-version ──┬──► build-core (linux / macos / windows in parallel)
               │         │
-              └─────────┼──► publish-pypi
-                        ├──► publish-npm
-                        ├──► publish-nuget
-                        └──► publish-maven
+              │         ├──► publish-pypi
+              │         ├──► publish-npm
+              │         ├──► publish-nuget
+              │         └──► publish-maven
+              │
+              └──► goreleaser   (tags only — CLI binaries, deb, rpm, Homebrew, Scoop)
 ```
 
 1. **`get-version`** — reads the base version from `bindings/python/pyproject.toml`, inspects the tag or schedule trigger, and outputs `version`, `maven_version`, `npm_tag`, and `release_type`.
 2. **`build-core`** — compiles `libomniql.so` / `libomniql.dylib` / `omniql.dll` using Go with CGO.
 3. **Publish jobs** — each binding downloads the three native binaries, stamps the version, and publishes to its registry.
+4. **`goreleaser`** *(added v0.6.0)* — builds the `omniql` CLI binary for all platforms, creates archives, `.deb`/`.rpm` packages, and publishes to GitHub Releases / Homebrew / Scoop. Runs on tag pushes only (not nightly).
+
+---
+
+## Binary Distribution (v0.6.0+)
+
+Starting with v0.6.0, pre-built `omniql` CLI binaries are published via GoReleaser
+alongside the language-binding packages.
+
+### Platforms & formats
+
+| Platform | amd64 | arm64 | Formats |
+|----------|-------|-------|---------|
+| Linux | ✅ | ✅ | `.tar.gz`, `.deb`, `.rpm` |
+| macOS | ✅ | ✅ | `.tar.gz`, Homebrew tap |
+| Windows | ✅ | — | `.zip`, Scoop bucket |
+
+### GitHub Actions secrets required
+
+| Secret | Used for |
+|--------|----------|
+| `GITHUB_TOKEN` | GitHub Release uploads (provided automatically) |
+| `HOMEBREW_TAP_TOKEN` | Push formula to `Uttam-Mahata/homebrew-omniql` (PAT, `repo` scope) |
+| `SCOOP_BUCKET_TOKEN` | Push manifest to `Uttam-Mahata/scoop-omniql` (PAT, `repo` scope) |
+
+### Local dry-run
+
+```bash
+# Produces artifacts in ./dist without touching GitHub
+goreleaser release --snapshot --clean
+```
