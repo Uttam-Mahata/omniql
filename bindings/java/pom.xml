@@ -6,7 +6,7 @@
 
     <groupId>io.github.uttam-mahata</groupId>
     <artifactId>omniql</artifactId>
-    <version>0.8.1</version>
+    <version>1.0.1-local</version>
     <name>OmniQL Java Binding</name>
     <description>A standardized, multi-database query language (OQL) for Java.</description>
     <url>https://github.com/Uttam-Mahata/omniql</url>
@@ -55,6 +55,7 @@
     </distributionManagement>
 
     <profiles>
+        <!-- Activate with -Prelease to GPG-sign artifacts (required for Maven Central) -->
         <profile>
             <id>release</id>
             <build>
@@ -82,14 +83,71 @@
                 </plugins>
             </build>
         </profile>
+
+        <!-- Activate with -Pcentral to publish to Maven Central via Sonatype Central Portal -->
+        <profile>
+            <id>central</id>
+            <build>
+                <plugins>
+                    <!-- Skip the default deploy plugin; central-publishing-maven-plugin handles upload -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <version>3.1.2</version>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.6.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <!-- credentials server id in ~/.m2/settings.xml -->
+                            <publishingServerId>central</publishingServerId>
+                            <!-- auto-publish once validation passes -->
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 
     <build>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>11</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <!--
+                                Grant native access so NativeLoader can call System.load()
+                                without a JVM warning on Java 22+.
+                                  io.omniql    — when JAR is on the module path (named module)
+                                  ALL-UNNAMED  — when JAR is on the classpath (unnamed module)
+                            -->
+                            <Enable-Native-Access>io.omniql ALL-UNNAMED</Enable-Native-Access>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-deploy-plugin</artifactId>
-                <version>2.8.2</version>
+                <version>3.1.2</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
