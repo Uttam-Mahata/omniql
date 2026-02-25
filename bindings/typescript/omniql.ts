@@ -127,6 +127,16 @@ export class OmniEngine {
     return (JSON.parse(raw) as { driver: string }).driver ?? 'mongo';
   }
 
+  async batchInsert<T = Record<string, unknown>>(
+    target: string,
+    docs: Record<string, unknown>[],
+  ): Promise<OmniResult<T>> {
+    const payload = { target, action: 'BATCH_INSERT' as const, documents: docs };
+    const json = JSON.stringify(payload);
+    const rawResponse = bridge.execute(this.handle, json);
+    return JSON.parse(rawResponse) as OmniResult<T>;
+  }
+
   close(): void {
     bridge.freeEngine(this.handle);
   }

@@ -221,6 +221,33 @@ namespace OmniQL
             Native.Free(ptr);
         }
 
+        /// <summary>
+        /// Inserts multiple documents in a single BATCH_INSERT operation asynchronously.
+        /// </summary>
+        public Task<OmniResult> BatchInsertAsync(string target, IEnumerable<Dictionary<string, object>> docs)
+        {
+            return Task.Run(() =>
+            {
+                var queryMap = new Dictionary<string, object>
+                {
+                    ["target"]    = target,
+                    ["action"]    = "BATCH_INSERT",
+                    ["documents"] = docs,
+                };
+                string queryJson = JsonSerializer.Serialize(queryMap);
+                IntPtr ptr = Native.Execute(_handle, queryJson);
+                try
+                {
+                    string json = Marshal.PtrToStringAnsi(ptr) ?? "{}";
+                    return JsonSerializer.Deserialize<OmniResult>(json) ?? new OmniResult();
+                }
+                finally
+                {
+                    Native.Free(ptr);
+                }
+            });
+        }
+
         /// <summary>Returns a fluent query builder for the given target.</summary>
         public QueryBuilder Table(string target) => new QueryBuilder(this, target);
 
@@ -292,5 +319,8 @@ namespace OmniQL
         public QueryBuilder Fields(Dictionary<string, object> fields) { _query.Options.Fields = fields; return this; }
 
         public Task<OmniResult> ExecuteAsync() => _engine.ExecuteAsync(_query);
+
+        public Task<OmniResult> BatchInsertAsync(IEnumerable<Dictionary<string, object>> docs)
+            => _engine.BatchInsertAsync(_query.Target, docs);
     }
 }

@@ -271,3 +271,25 @@ class OmniEngine:
         """Register a MongoDB driver asynchronously.  Returns the driver name."""
         loop = self._get_loop()
         return await loop.run_in_executor(None, self.register_mongo_driver_sync, uri, db_name)
+
+    def batch_insert_sync(self, target: str, docs: List[Dict[str, Any]]) -> OmniResult:
+        """Insert multiple documents synchronously via BATCH_INSERT action."""
+        query = Query(
+            target=target,
+            action="BATCH_INSERT",
+        )
+        d = query.to_dict()
+        d["documents"] = docs
+        query_json = json.dumps(d).encode("utf-8")
+        with self._lock:
+            raw = _lib.OmniQL_Execute(self._handle, query_json)
+        try:
+            response = json.loads(_ffi.string(raw).decode("utf-8"))
+        finally:
+            _lib.OmniQL_Free(raw)
+        return OmniResult.from_dict(response)
+
+    async def batch_insert(self, target: str, docs: List[Dict[str, Any]]) -> OmniResult:
+        """Insert multiple documents asynchronously via BATCH_INSERT action."""
+        loop = self._get_loop()
+        return await loop.run_in_executor(None, self.batch_insert_sync, target, docs)
