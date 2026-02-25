@@ -69,3 +69,4 @@ logs/
 .tokens
 examples/
 bindings/java/target
+# discussions/
