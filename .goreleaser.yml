@@ -1,7 +1,7 @@
 # GoReleaser configuration for OmniQL CLI distribution.
 #
 # Builds the omniql CLI binary for Linux, macOS, and Windows across amd64/arm64,
-# packages native artifacts (archives, .deb, .rpm), and publishes to Homebrew and Scoop.
+# packages native artifacts (archives, .deb, .rpm), and publishes to GitHub Releases.
 #
 # Usage:
 #   goreleaser release --snapshot --clean   # dry-run / local snapshot
@@ -9,8 +9,6 @@
 #
 # Prerequisites:
 #   - GITHUB_TOKEN env var must be set with repo write permission.
-#   - For Homebrew: a tap repo (homebrew-omniql) must exist at the same GitHub org/user.
-#   - For Scoop: a scoop-omniql bucket repo must exist at the same GitHub org/user.
 version: 2
 
 project_name: omniql
@@ -41,12 +39,14 @@ builds:
 
 archives:
   - id: default
-    builds:
+    build_ids:
       - omniql
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
@@ -76,7 +76,7 @@ release:
 nfpms:
   - id: omniql-packages
     package_name: omniql
-    builds:
+    build_ids:
       - omniql
     vendor: OmniQL
     homepage: https://github.com/Uttam-Mahata/omniql
@@ -93,28 +93,3 @@ nfpms:
         dst: /usr/share/doc/omniql/README.md
     bindir: /usr/bin
 
-brews:
-  - name: omniql
-    ids:
-      - default
-    repository:
-      owner: Uttam-Mahata
-      name: homebrew-omniql
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/Uttam-Mahata/omniql
-    description: Unified query routing layer — one query API for any database.
-    license: MIT
-    test: |
-      system "#{bin}/omniql", "--help"
-
-scoops:
-  - name: omniql
-    ids:
-      - default
-    repository:
-      owner: Uttam-Mahata
-      name: scoop-omniql
-      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
-    homepage: https://github.com/Uttam-Mahata/omniql
-    description: Unified query routing layer — one query API for any database.
-    license: MIT
