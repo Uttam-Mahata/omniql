@@ -80,6 +80,36 @@ func goRegisterMySQLDriver(handle int, dsn string) string {
 	return s
 }
 
+// goRegisterSQLServerDriver wraps OmniQL_RegisterSQLServerDriver.
+func goRegisterSQLServerDriver(handle int, dsn string) string {
+	cs := C.CString(dsn)
+	defer C.free(unsafe.Pointer(cs))
+	result := OmniQL_RegisterSQLServerDriver(C.int(handle), cs)
+	s := C.GoString(result)
+	C.free(unsafe.Pointer(result))
+	return s
+}
+
+// goRegisterRedisDriver wraps OmniQL_RegisterRedisDriver.
+func goRegisterRedisDriver(handle int, url string) string {
+	cs := C.CString(url)
+	defer C.free(unsafe.Pointer(cs))
+	result := OmniQL_RegisterRedisDriver(C.int(handle), cs)
+	s := C.GoString(result)
+	C.free(unsafe.Pointer(result))
+	return s
+}
+
+// goRegisterElasticsearchDriver wraps OmniQL_RegisterElasticsearchDriver.
+func goRegisterElasticsearchDriver(handle int, addr string) string {
+	cs := C.CString(addr)
+	defer C.free(unsafe.Pointer(cs))
+	result := OmniQL_RegisterElasticsearchDriver(C.int(handle), cs)
+	s := C.GoString(result)
+	C.free(unsafe.Pointer(result))
+	return s
+}
+
 // goGetEngine is a test-helper wrapper around getEngine that accepts a plain
 // Go int rather than a C.int.
 func goGetEngine(handle int) *core.Engine {

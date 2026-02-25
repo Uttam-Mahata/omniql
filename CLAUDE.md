@@ -20,15 +20,23 @@ go test ./pkg/drivers/sqlite/...
 go test ./pkg/drivers/postgres/...
 go test ./pkg/drivers/mongo/...
 go test ./pkg/drivers/mysql/...
+go test ./pkg/drivers/sqlserver/...
+go test ./pkg/drivers/redis/...
 go test ./pkg/compliance/...
 go test ./pkg/ffi/...
 
 # Run a single test
 go test ./pkg/core/... -run TestEngineName
 
-# MySQL / Postgres integration tests (require live DB)
+# Integration tests (require live DB / service)
 MYSQL_DSN="root:@tcp(127.0.0.1:3306)/test" go test ./pkg/drivers/mysql/...
 POSTGRES_DSN="postgres://user:pass@localhost/testdb?sslmode=disable" go test ./pkg/drivers/postgres/...
+SQLSERVER_DSN="sqlserver://sa:Pass@localhost:1433?database=test" go test ./pkg/drivers/sqlserver/...
+REDIS_URL="redis://localhost:6379/0" go test ./pkg/drivers/redis/...
+
+# Fuzz tests
+go test -fuzz=FuzzExecute    -fuzztime=30s ./pkg/core/...
+go test -fuzz=FuzzFFIExecute -fuzztime=30s ./pkg/ffi/...
 
 # Lint (standard Go tooling)
 go vet ./...
@@ -64,25 +72,44 @@ Key types:
 | SQLite | `pkg/drivers/sqlite` | `?` | `"ident"` | CGO. `New(dsn)` or `NewFromDB(db)`. |
 | PostgreSQL | `pkg/drivers/postgres` | `$N` | `"ident"` | `lib/pq`. Takes a pre-opened `*sql.DB`. |
 | MongoDB | `pkg/drivers/mongo` | BSON | — | `mongo-driver`. OQL operators map 1:1 to BSON. |
-| MySQL | `pkg/drivers/mysql` | `?` | `` `ident` `` | `go-sql-driver/mysql`. JSON path via `->>`. |
+| MySQL | `pkg/drivers/mysql` | `?` | `` `ident` `` | `go-sql-driver/mysql`. JSON path via `->>'$.path'`. |
+| SQL Server | `pkg/drivers/sqlserver` | `@pN` | `"ident"` | `go-mssqldb`. JSON path via `JSON_VALUE`. OFFSET/FETCH pagination. |
+| Redis | `pkg/drivers/redis` | — | — | `go-redis/v9`. Key pattern `<target>:<id>`. TTL via `_ttl` field. |
 
-All four drivers follow the same pattern: a top-level `Execute` switch dispatches to private `find`, `insert`, `update`, `delete` methods. SQL drivers build parameterised queries via `buildWhere`. `$or` / `$and` are handled recursively. `Fields` (projection) only honours inclusion (`1`); `Sort` values `1`/`-1` map to ASC/DESC.
+All SQL drivers share parameterised query building via `pkg/drivers/sqlutil.BuildWhere`. The top-level `Execute` switch dispatches to private `find`, `insert`, `update`, `delete` methods. `$or` / `$and` are handled recursively. `Fields` (projection) only honours inclusion (`1`); `Sort` values `1`/`-1` map to ASC/DESC.
 
 **Important:** When implementing `BatchInsert`, always collect column names into a sorted slice and use that slice for both the SQL statement and each row's value list. Go map iteration order is non-deterministic — iterating a map twice may produce different orderings.
 
+### Shared SQL utilities (`pkg/drivers/sqlutil/`)
+
+`sqlutil.BuildWhere` is the canonical WHERE-clause builder used by all SQL drivers:
+
+```go
+func BuildWhere(
+    filter       map[string]interface{},
+    placeholder  PlaceholderFn,    // Question / Dollar / AtParam
+    quoteIdent   func(string) string,
+    translateCol func(string) string,
+    startIdx     int,
+) (clause string, args []interface{}, nextIdx int, err error)
+```
+
+Use `sqlutil.Question`, `sqlutil.Dollar`, or `sqlutil.AtParam` as the placeholder function.
+
 ### Compliance suite (`pkg/compliance/`)
 
-`pkg/compliance/suite_test.go` contains 50+ canonical OQL tests run against every driver. SQLite always runs (in-memory). PostgreSQL and MongoDB run when `POSTGRES_DSN` / `MONGO_URI`+`MONGO_DB` environment variables are set. All new drivers must pass the compliance suite.
+`pkg/compliance/suite_test.go` contains 50+ canonical OQL tests run against every driver. SQLite always runs (in-memory). PostgreSQL, MongoDB, and MySQL run when their respective env vars are set (`POSTGRES_DSN`, `MONGO_URI`+`MONGO_DB`, `MYSQL_DSN`). All new drivers must pass the compliance suite.
 
 ### FFI layer (`pkg/ffi/`)
 
 `pkg/ffi` is declared `package main` — **required** by Go's `-buildmode=c-shared`. It exposes a C ABI over an internal `engines` map keyed by opaque integer handles.
 
-Exported functions (v0.6.0):
+Exported functions (v0.7.0):
 `OmniQL_NewEngine`, `OmniQL_FreeEngine`, `OmniQL_Execute`, `OmniQL_Free`,
 `OmniQL_RegisterSchema`, `OmniQL_Route`,
 `OmniQL_RegisterSQLiteDriver`, `OmniQL_RegisterPostgresDriver`,
-`OmniQL_RegisterMongoDriver`, `OmniQL_RegisterMySQLDriver`
+`OmniQL_RegisterMongoDriver`, `OmniQL_RegisterMySQLDriver`,
+`OmniQL_RegisterSQLServerDriver`, `OmniQL_RegisterRedisDriver`
 
 `wrappers.go` provides Go-typed shims (`goNewEngine`, `goExecute`, …) so that test files can call FFI logic without importing `"C"` (forbidden in test files of packages that use `//export`).
 
@@ -97,7 +124,11 @@ Two modes of operation:
 
 ### Language bindings (`bindings/`)
 
-Each binding (`java/`, `python/`, `csharp/`, `typescript/`) loads `libomniql.so` at runtime and wraps the C ABI. All four follow the same three-step pattern: register driver → route target → execute query. All bindings expose a `batchInsert` convenience method (v0.6.0). The bindings are standalone files and do not form part of the Go module.
+Each binding (`java/`, `python/`, `csharp/`, `typescript/`) loads `libomniql.so` at runtime and wraps the C ABI. All four follow the same three-step pattern: register driver → route target → execute query. All bindings expose:
+- `batchInsert` convenience method (v0.6.0)
+- `find_many`, `find_first`, `count`, `insert_one`, `update_many`, `delete_many` terminal convenience methods (v0.7.0)
+
+The bindings are standalone files and do not form part of the Go module.
 
 ## CI/CD & Release Strategy
 
@@ -107,32 +138,32 @@ Releases are tag-driven. **Do not push to `dev` to publish packages** — the pu
 
 | Release type | Tag format | Example |
 |---|---|---|
-| Stable | `v<major>.<minor>.<patch>` | `v0.6.0` |
-| Release Candidate | `v<version>-rc.<n>` | `v0.6.0-rc.1` |
-| Beta | `v<version>-beta.<n>` | `v0.6.0-beta.1` |
+| Stable | `v<major>.<minor>.<patch>` | `v0.7.0` |
+| Release Candidate | `v<version>-rc.<n>` | `v0.7.0-rc.1` |
+| Beta | `v<version>-beta.<n>` | `v0.7.0-beta.1` |
 | Nightly | *(scheduled — no tag needed)* | runs daily at 02:00 UTC |
 
 ### Cutting a release
 
 ```bash
 # Beta
-git tag v0.6.0-beta.1 && git push origin v0.6.0-beta.1
+git tag v0.7.0-beta.1 && git push origin v0.7.0-beta.1
 
 # Release candidate
-git tag v0.6.0-rc.1 && git push origin v0.6.0-rc.1
+git tag v0.7.0-rc.1 && git push origin v0.7.0-rc.1
 
 # Stable
-git tag v0.6.0 && git push origin v0.6.0
+git tag v0.7.0 && git push origin v0.7.0
 ```
 
 ### Version matrix per ecosystem
 
 | Type | Python / NuGet / Maven JAR | npm dist-tag | Maven | CLI binaries |
 |---|---|---|---|---|
-| nightly | `0.6.0-nightly.YYYYMMDD` | `nightly` | `0.6.0-SNAPSHOT` | — |
-| beta | `0.6.0-beta.1` | `beta` | `0.6.0-beta.1` | GoReleaser |
-| rc | `0.6.0-rc.1` | `next` | `0.6.0-rc.1` | GoReleaser |
-| stable | `0.6.0` | `latest` | `0.6.0` | GoReleaser |
+| nightly | `0.7.0-nightly.YYYYMMDD` | `nightly` | `0.7.0-SNAPSHOT` | — |
+| beta | `0.7.0-beta.1` | `beta` | `0.7.0-beta.1` | GoReleaser |
+| rc | `0.7.0-rc.1` | `next` | `0.7.0-rc.1` | GoReleaser |
+| stable | `0.7.0` | `latest` | `0.7.0` | GoReleaser |
 
 The base version is the source of truth in `bindings/python/pyproject.toml`. Update it there before tagging.
 

@@ -9,7 +9,7 @@ import (
 
 // DriverConfig holds the connection configuration for a named driver.
 type DriverConfig struct {
-	Type string `yaml:"type"` // sqlite, postgres, mongo, mysql
+	Type string `yaml:"type"` // sqlite, postgres, mongo, mysql, sqlserver, redis, elasticsearch
 	DSN  string `yaml:"dsn"`
 	DB   string `yaml:"db,omitempty"` // database name (required for mongo)
 }

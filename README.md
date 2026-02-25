@@ -1,6 +1,6 @@
 # OmniQL — One Query Language, Every Database.
 
-> **Version:** v0.8.1
+> **Version:** v0.7.0
 > **Module:** `github.com/Uttam-Mahata/omniql`
 
 OmniQL is a unified data access layer that abstracts away the complexity of
@@ -50,7 +50,7 @@ handles its own query translation and execution.
 | Time-Series        | InfluxDB, TimescaleDB, QuestDB                           | Time-windowed aggregations                  |
 | Graph              | Neo4j, SurrealDB, Memgraph                               | Relationship / traversal queries            |
 
-**v0.8.1 Standard Library drivers:** PostgreSQL · MongoDB · SQLite
+**v0.7.0 drivers:** PostgreSQL · MySQL · SQLite · MongoDB · SQL Server · Redis
 
 ---
 
@@ -109,13 +109,18 @@ omniql/
 ├── pkg/
 │   ├── core/               # Engine, Driver interface, Schema, OQL types, OmniJSON
 │   ├── drivers/
+│   │   ├── sqlite/         # SQLite driver (go-sqlite3, CGO)
 │   │   ├── postgres/       # PostgreSQL driver (database/sql + lib/pq)
 │   │   ├── mongo/          # MongoDB driver (mongo-driver)
-│   │   └── sqlite/         # SQLite driver (go-sqlite3)
+│   │   ├── mysql/          # MySQL driver (go-sql-driver/mysql)
+│   │   ├── sqlserver/      # SQL Server driver (go-mssqldb)   ← v0.7.0
+│   │   ├── redis/          # Redis KV driver (go-redis/v9)    ← v0.7.0
+│   │   └── sqlutil/        # Shared WHERE clause builder       ← v0.7.0
+│   ├── compliance/         # Cross-driver compliance test suite
 │   └── ffi/                # C-shared library (FFI for language bindings)
 │       ├── ffi.go          # Exported C ABI (package main — required for c-shared)
 │       ├── wrappers.go     # Go-typed shims used by the test suite
-│       └── ffi_test.go     # FFI smoke tests
+│       └── ffi_test.go     # FFI smoke + fuzz tests
 ├── bindings/
 │   ├── java/               # JNI wrapper — Maven Central
 │   ├── python/             # CFFI extension — PyPI
@@ -342,17 +347,20 @@ The `omniql` binary lets you run ad-hoc OQL queries from the command line.
 go build -o omniql ./cmd/omniql
 
 # Usage
-omniql -driver <sqlite|postgres|mongo> -dsn <dsn> [-db <dbname>] -query '<OQL JSON>'
+omniql -driver <driver> -dsn <dsn> [-db <dbname>] -query '<OQL JSON>'
+# or with a config file:
+omniql [-config omniql.yaml] -query '<OQL JSON>'
 ```
 
 ### Flags
 
-| Flag      | Description                                                      |
-|-----------|------------------------------------------------------------------|
-| `-driver` | Database driver: `sqlite`, `postgres`, or `mongo`               |
-| `-dsn`    | Connection string / file path / MongoDB URI                      |
-| `-db`    | Database name (required for `mongo`)                             |
-| `-query`  | JSON-encoded OQL query                                           |
+| Flag      | Description                                                                   |
+|-----------|-------------------------------------------------------------------------------|
+| `-driver` | `sqlite`, `postgres`, `mongo`, `mysql`, `sqlserver`, `redis`                 |
+| `-dsn`    | Connection string / file path / URI                                           |
+| `-db`     | Database name (required for `mongo`)                                          |
+| `-query`  | JSON-encoded OQL query                                                        |
+| `-config` | Path to `omniql.yaml` config file (default: `./omniql.yaml`)                 |
 
 ### Examples
 
@@ -366,9 +374,14 @@ omniql -driver postgres \
   -dsn "postgres://user:pass@localhost/mydb?sslmode=disable" \
   -query '{"target":"orders","action":"FIND","filter":{"status":"pending"}}'
 
-# MongoDB
-omniql -driver mongo -dsn "mongodb://localhost:27017" -db mydb \
-  -query '{"target":"products","action":"COUNT","filter":{"price":{"$lt":100}}}'
+# SQL Server
+omniql -driver sqlserver \
+  -dsn "sqlserver://sa:Pass@localhost:1433?database=mydb" \
+  -query '{"target":"orders","action":"COUNT","filter":{"status":"pending"}}'
+
+# Redis
+omniql -driver redis -dsn "redis://localhost:6379/0" \
+  -query '{"target":"sessions","action":"FIND","filter":{"id":"tok:abc"}}'
 ```
 
 ---
@@ -376,40 +389,43 @@ omniql -driver mongo -dsn "mongodb://localhost:27017" -db mydb \
 ## Running Tests
 
 ```bash
-# Core engine tests
-go test ./pkg/core/...
+# All tests (CGO required for SQLite/FFI; others skip without env vars)
+CGO_ENABLED=1 go test ./...
 
-# SQLite driver integration tests (no external DB required)
-go test ./pkg/drivers/sqlite/...
+# Compliance suite (SQLite always; add env vars for other drivers)
+MYSQL_DSN="root:@tcp(127.0.0.1:3306)/test" go test ./pkg/compliance/...
 
-# PostgreSQL filter unit tests
-go test ./pkg/drivers/postgres/...
+# SQL Server integration
+SQLSERVER_DSN="sqlserver://sa:Pass@localhost:1433?database=test" \
+  go test ./pkg/drivers/sqlserver/...
 
-# Mongo driver integration tests (using mtest)
-go test ./pkg/drivers/mongo/...
+# Redis integration
+REDIS_URL="redis://localhost:6379/0" go test ./pkg/drivers/redis/...
 
-# FFI smoke tests (no shared library build required)
-go test ./pkg/ffi/...
-
-# All tests
-go test ./...
+# Fuzz tests (short run)
+go test -fuzz=FuzzExecute    -fuzztime=30s ./pkg/core/...
+go test -fuzz=FuzzFFIExecute -fuzztime=30s ./pkg/ffi/...
 ```
 
 ---
 
-## Advanced Features (Roadmap)
+## Roadmap
 
-### v0.8.0 (Released)
-- **Mixed Projection** — Support mixed include/exclude projection (requires schema awareness).
-- **Transactions** — `BeginTx` / `Commit` / `Rollback` as an optional `TransactionalDriver` interface.
-- **Batch inserts** — insert multiple documents in a single round-trip.
-- **`$not` operator** — support for logical negation.
+### v0.7.0 (Current)
+- **SQL Server driver** — full CRUD, JSON_VALUE paths, OFFSET/FETCH pagination.
+- **Redis driver** — KV/cache paradigm, TTL support, pipeline batch inserts.
+- **Shared SQL utilities** — `sqlutil.BuildWhere` replaces duplicated WHERE logic.
+- **Terminal convenience methods** — `find_many`, `find_first`, `count`, `insert_one`, `update_many`, `delete_many` on all bindings.
+- **Fuzz tests** — `FuzzExecute` and `FuzzFFIExecute` for panic-free guarantees.
+
+### v0.7.1 (Planned)
+- **Elasticsearch driver** — Query DSL translation, `_search` / `_bulk` / `_count` APIs.
+- **Interactive REPL** — `omniql shell` for ad-hoc JSON query sessions with history.
 
 ### Future
 - **Virtual DB / Federation** — join data from Postgres and MongoDB in a single query.
 - **Unified Migration CLI** — `omniql-migrate up` applies schema changes across all databases simultaneously.
 - **Real-time Sync (CDC)** — listen for changes in one database and automatically sync to another.
-- **Additional drivers** — MySQL, Redis, Elasticsearch, InfluxDB, Neo4j, and more.
 
 ---
 
