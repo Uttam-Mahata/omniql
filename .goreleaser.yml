@@ -97,7 +97,7 @@ brews:
   - name: omniql
     ids:
       - default
-    tap:
+    repository:
       owner: Uttam-Mahata
       name: homebrew-omniql
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
