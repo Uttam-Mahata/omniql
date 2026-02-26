@@ -115,3 +115,21 @@ func goRegisterElasticsearchDriver(handle int, addr string) string {
 func goGetEngine(handle int) *core.Engine {
 	return getEngine(C.int(handle))
 }
+
+// goMigrate wraps OmniQL_Migrate.
+func goMigrate(handle int, sourceTarget, destTarget string, batchSize int, dryRun bool) string {
+	cs := C.CString(sourceTarget)
+	defer C.free(unsafe.Pointer(cs))
+	cd := C.CString(destTarget)
+	defer C.free(unsafe.Pointer(cd))
+
+	dr := C.int(0)
+	if dryRun {
+		dr = 1
+	}
+
+	result := OmniQL_Migrate(C.int(handle), cs, cd, C.int(batchSize), dr)
+	s := C.GoString(result)
+	C.free(unsafe.Pointer(result))
+	return s
+}

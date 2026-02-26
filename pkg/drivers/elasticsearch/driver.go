@@ -57,6 +57,72 @@ func (d *Driver) Ping(ctx context.Context) error {
 // Close satisfies core.Driver. Elasticsearch HTTP client has no explicit close.
 func (d *Driver) Close() error { return nil }
 
+// EnsureTarget satisfies SchemaAwareDriver.
+func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
+	// Check if index exists
+	res, err := d.client.Indices.Exists([]string{target}, d.client.Indices.Exists.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("elasticsearch check index: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == 200 {
+		return nil // exists
+	}
+
+	// Create index
+	body := map[string]interface{}{}
+	if schema != nil {
+		props := make(map[string]interface{})
+		for name, field := range schema.Fields {
+			props[name] = map[string]interface{}{"type": esType(field.Type)}
+		}
+		body["mappings"] = map[string]interface{}{
+			"properties": props,
+		}
+	}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	resCreate, err := d.client.Indices.Create(
+		target,
+		d.client.Indices.Create.WithContext(ctx),
+		d.client.Indices.Create.WithBody(bytes.NewReader(data)),
+	)
+	if err != nil {
+		return fmt.Errorf("elasticsearch create index: %w", err)
+	}
+	defer resCreate.Body.Close()
+
+	if resCreate.IsError() {
+		return fmt.Errorf("elasticsearch create index: %s", resCreate.Status())
+	}
+
+	return nil
+}
+
+func esType(ft core.FieldType) string {
+	switch ft {
+	case core.FieldTypeString:
+		return "text"
+	case core.FieldTypeInt:
+		return "long"
+	case core.FieldTypeFloat:
+		return "double"
+	case core.FieldTypeBool:
+		return "boolean"
+	case core.FieldTypeArray:
+		return "nested"
+	case core.FieldTypeObject:
+		return "object"
+	default:
+		return "text"
+	}
+}
+
 // Execute dispatches the OQL query to the appropriate Elasticsearch operation.
 func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	switch query.Action {

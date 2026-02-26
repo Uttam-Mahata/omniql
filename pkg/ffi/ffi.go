@@ -315,5 +315,34 @@ func OmniQL_RegisterElasticsearchDriver(handle C.int, addr *C.char) *C.char {
 	return C.CString(string(data))
 }
 
+// OmniQL_Migrate copies data from source to destination target.
+// Returns JSON-encoded MigrateResult.
+//
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_Migrate
+func OmniQL_Migrate(handle C.int, sourceTarget, destTarget *C.char, batchSize C.int, dryRun C.int) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+
+	opts := core.MigrateOptions{
+		BatchSize: int(batchSize),
+		DryRun:    dryRun != 0,
+	}
+
+	result, err := engine.Migrate(context.Background(), C.GoString(sourceTarget), C.GoString(destTarget), opts)
+	if err != nil {
+		return errorJSON("MIGRATION_ERROR", err.Error())
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return errorJSON("MARSHAL_ERROR", err.Error())
+	}
+	return C.CString(string(data))
+}
+
 // main is required for c-shared build mode.
 func main() {}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
 	"github.com/Uttam-Mahata/omniql/pkg/drivers/sqlutil"
@@ -18,13 +19,18 @@ const driverName = "postgres"
 
 // Driver is the OmniQL PostgreSQL adapter.
 type Driver struct {
-	db *sql.DB
+	db           *sql.DB
+	mu           sync.RWMutex
+	tableColumns map[string]map[string]bool
 }
 
 // New creates a new PostgreSQL Driver using the provided *sql.DB connection.
 // The caller is responsible for opening and configuring the connection.
 func New(db *sql.DB) *Driver {
-	return &Driver{db: db}
+	return &Driver{
+		db:           db,
+		tableColumns: make(map[string]map[string]bool),
+	}
 }
 
 // Name satisfies core.Driver.
@@ -35,6 +41,66 @@ func (d *Driver) Ping(ctx context.Context) error { return d.db.PingContext(ctx) 
 
 // Close satisfies core.Driver.
 func (d *Driver) Close() error { return d.db.Close() }
+
+// EnsureTarget satisfies SchemaAwareDriver.
+func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
+	if schema == nil {
+		return nil
+	}
+	ddl := sqlutil.BuildCreateTable(target, schema, "postgres", quote, sqlutil.PostgresTypes)
+	_, err := d.db.ExecContext(ctx, ddl)
+	return err
+}
+
+func (d *Driver) ensureColumns(ctx context.Context, target string, doc map[string]interface{}) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.tableColumns[target] == nil {
+		cols, err := d.loadTableInfo(ctx, target)
+		if err != nil {
+			return err
+		}
+		d.tableColumns[target] = cols
+	}
+	cols := d.tableColumns[target]
+
+	for key, val := range doc {
+		if _, exists := cols[key]; !exists {
+			colType := sqlutil.PostgresTypes(core.InferFieldType(val))
+			alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", quote(target), quote(key), colType)
+
+			if _, err := d.db.ExecContext(ctx, alter); err != nil {
+				// Ignore if column already exists
+				if !strings.Contains(err.Error(), "already exists") {
+					return fmt.Errorf("alter table add column %s: %w", key, err)
+				}
+			}
+			cols[key] = true
+		}
+	}
+	return nil
+}
+
+func (d *Driver) loadTableInfo(ctx context.Context, target string) (map[string]bool, error) {
+	// Use LIMIT 0 to get column metadata without scanning table
+	rows, err := d.db.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s LIMIT 0", quote(target)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	names, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	cols := make(map[string]bool)
+	for _, name := range names {
+		cols[name] = true
+	}
+	return cols, nil
+}
 
 // Execute translates an OQLQuery into a SQL statement, runs it, and returns
 // the result rows as a slice of generic maps.
@@ -137,6 +203,10 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 		return nil, 0, fmt.Errorf("postgres: INSERT requires a non-empty document")
 	}
 
+	if err := d.ensureColumns(ctx, query.Target, query.Document); err != nil {
+		return nil, 0, err
+	}
+
 	cols := make([]string, 0, len(query.Document))
 	placeholders := make([]string, 0, len(query.Document))
 	vals := make([]interface{}, 0, len(query.Document))
@@ -167,6 +237,18 @@ func (d *Driver) insert(ctx context.Context, query core.OQLQuery) ([]map[string]
 func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
 	if len(docs) == 0 {
 		return []map[string]interface{}{}, nil
+	}
+
+	merged := make(map[string]interface{})
+	for _, doc := range docs {
+		for k, v := range doc {
+			if _, exists := merged[k]; !exists {
+				merged[k] = v
+			}
+		}
+	}
+	if err := d.ensureColumns(ctx, target, merged); err != nil {
+		return nil, err
 	}
 
 	first := docs[0]

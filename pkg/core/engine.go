@@ -31,6 +31,8 @@ type Engine struct {
 	registry      *SchemaRegistry
 	strict        bool
 	defaultDriver string // name of the first driver registered (deterministic fallback)
+	ensuredTargets map[string]bool
+	autoSchema     bool
 }
 
 // EngineOption is a functional option for configuring the Engine.
@@ -42,12 +44,21 @@ func WithStrictSchema() EngineOption {
 	return func(e *Engine) { e.strict = true }
 }
 
+// WithAutoSchema controls whether the engine auto-creates targets.
+// Enabled by default. Disable for production environments where schema
+// changes should be explicit.
+func WithAutoSchema(enabled bool) EngineOption {
+	return func(e *Engine) { e.autoSchema = enabled }
+}
+
 // NewEngine creates a new Core Engine with the given options.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
-		drivers:  make(map[string]Driver),
-		routes:   make(map[string]string),
-		registry: NewSchemaRegistry(),
+		drivers:        make(map[string]Driver),
+		routes:         make(map[string]string),
+		registry:       NewSchemaRegistry(),
+		ensuredTargets: make(map[string]bool),
+		autoSchema:     true,
 	}
 	for _, o := range opts {
 		o(e)
@@ -91,6 +102,25 @@ func (e *Engine) Execute(ctx context.Context, query OQLQuery) (*OmniJSON, error)
 	driver, err := e.selectDriver(query.Target)
 	if err != nil {
 		return errorResponse(err, "DRIVER_ERROR"), nil
+	}
+
+	// Auto-ensure target on first write operation
+	if e.autoSchema && isWriteAction(query.Action) {
+		e.mu.Lock()
+		ensured := e.ensuredTargets[query.Target]
+		e.mu.Unlock()
+
+		if !ensured {
+			if sad, ok := driver.(SchemaAwareDriver); ok {
+				schema := e.inferOrGetSchema(query)
+				if err := sad.EnsureTarget(ctx, query.Target, schema); err != nil {
+					return errorResponse(err, "EXECUTION_ERROR"), nil
+				}
+				e.mu.Lock()
+				e.ensuredTargets[query.Target] = true
+				e.mu.Unlock()
+			}
+		}
 	}
 
 	var rows []map[string]interface{}
@@ -163,6 +193,39 @@ func (e *Engine) Routes() map[string]string {
 		snapshot[k] = v
 	}
 	return snapshot
+}
+
+func isWriteAction(action Action) bool {
+	return action == ActionInsert || action == ActionBatchInsert ||
+		action == ActionUpdate || action == ActionDelete
+}
+
+// inferOrGetSchema returns the registered schema for a target, or infers
+// one from the query's document/documents.
+func (e *Engine) inferOrGetSchema(query OQLQuery) *CollectionSchema {
+	// Check registered schemas first
+	if schema, ok := e.registry.Get(query.Target); ok {
+		return &schema
+	}
+
+	// Infer from document
+	if len(query.Document) > 0 {
+		s := InferSchema(query.Target, query.Document)
+		return &s
+	}
+	if len(query.Documents) > 0 {
+		// Merge fields from all documents
+		merged := make(map[string]interface{})
+		for _, doc := range query.Documents {
+			for k, v := range doc {
+				merged[k] = v
+			}
+		}
+		s := InferSchema(query.Target, merged)
+		return &s
+	}
+
+	return nil
 }
 
 func errorResponse(err error, code string) *OmniJSON {

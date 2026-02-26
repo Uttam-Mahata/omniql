@@ -14,10 +14,17 @@ type DriverConfig struct {
 	DB   string `yaml:"db,omitempty"` // database name (required for mongo)
 }
 
+// EngineConfig holds core engine settings.
+type EngineConfig struct {
+	AutoSchema bool `yaml:"auto_schema"` // default: true
+}
+
 // Config is the top-level structure for omniql.yaml.
 //
 // Example:
 //
+//	engine:
+//	  auto_schema: true
 //	drivers:
 //	  main_db: { type: postgres, dsn: "postgres://..." }
 //	  cache:   { type: sqlite,   dsn: "./cache.db" }
@@ -25,6 +32,7 @@ type DriverConfig struct {
 //	  users:    main_db
 //	  sessions: cache
 type Config struct {
+	Engine  EngineConfig            `yaml:"engine"`
 	Drivers map[string]DriverConfig `yaml:"drivers"`
 	Routes  map[string]string       `yaml:"routes"` // target -> driver name key
 }
@@ -41,6 +49,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var cfg Config
+	// Set defaults
+	cfg.Engine.AutoSchema = true
+
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
 	}
