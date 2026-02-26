@@ -40,6 +40,12 @@ func (d *Driver) Close() error {
 	return d.client.Disconnect(context.Background())
 }
 
+// EnsureTarget satisfies SchemaAwareDriver.
+func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
+	// MongoDB creates collections implicitly. No action needed.
+	return nil
+}
+
 // Execute translates an OQLQuery into MongoDB operations and returns results.
 func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	coll := d.client.Database(d.dbName).Collection(query.Target)

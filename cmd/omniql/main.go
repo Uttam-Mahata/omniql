@@ -34,6 +34,7 @@ import (
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: omniql [options] -query '<OQL JSON>'")
 	fmt.Fprintln(os.Stderr, "       omniql shell [-config omniql.yaml]")
+	fmt.Fprintln(os.Stderr, "       omniql migrate -config omniql.yaml -source <target> -dest <target> [options]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Flag mode (single driver):")
 	fmt.Fprintln(os.Stderr, "  -driver   Database driver: sqlite, postgres, mongo, mysql, sqlserver, redis, or elasticsearch")
@@ -60,6 +61,13 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "shell" {
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 		runShellMode()
+		return
+	}
+
+	// Detect "migrate" subcommand
+	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		runMigrateMode()
 		return
 	}
 
@@ -204,6 +212,9 @@ func runShellMode() {
 
 // applyConfig registers all drivers and routes declared in cfg.
 func applyConfig(engine *core.Engine, cfg *Config) error {
+	// Apply engine options
+	core.WithAutoSchema(cfg.Engine.AutoSchema)(engine)
+
 	for name, dc := range cfg.Drivers {
 		if err := registerDriver(engine, dc.Type, dc.DSN, dc.DB); err != nil {
 			return fmt.Errorf("driver %q: %w", name, err)
