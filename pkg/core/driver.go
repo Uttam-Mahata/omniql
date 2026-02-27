@@ -51,3 +51,15 @@ type Driver interface {
 	// Close releases all resources held by the driver.
 	Close() error
 }
+
+// SchemaAwareDriver extends Driver with the ability to create storage targets
+// (tables, collections, indexes) automatically.
+type SchemaAwareDriver interface {
+	Driver
+
+	// EnsureTarget creates the target (table/collection/index) if it doesn't exist.
+	// If schema is nil, the driver should accept any document structure (schema-less mode).
+	// For SQL drivers, this means CREATE TABLE IF NOT EXISTS with inferred columns.
+	// For document/KV drivers, this may be a no-op (auto-create on first write).
+	EnsureTarget(ctx context.Context, target string, schema *CollectionSchema) error
+}
