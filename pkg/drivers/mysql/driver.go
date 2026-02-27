@@ -54,6 +54,29 @@ func (d *Driver) Ping(ctx context.Context) error { return d.db.PingContext(ctx) 
 // Close satisfies core.Driver.
 func (d *Driver) Close() error { return d.db.Close() }
 
+// ListTargets returns a list of tables.
+func (d *Driver) ListTargets(ctx context.Context) ([]string, error) {
+	query := "SHOW TABLES"
+	rows, err := d.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("mysql list targets: %w", err)
+	}
+	defer rows.Close()
+
+	var targets []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		targets = append(targets, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
 // EnsureTarget satisfies SchemaAwareDriver.
 func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
 	if schema == nil {

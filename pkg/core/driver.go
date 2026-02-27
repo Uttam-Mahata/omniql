@@ -45,6 +45,9 @@ type Driver interface {
 	// BatchInsert inserts multiple records in a single operation.
 	BatchInsert(ctx context.Context, target string, docs []map[string]interface{}) (rows []map[string]interface{}, err error)
 
+	// ListTargets returns a list of all targets (tables, collections) in the database.
+	ListTargets(ctx context.Context) ([]string, error)
+
 	// Ping verifies that the underlying database connection is healthy.
 	Ping(ctx context.Context) error
 

@@ -57,6 +57,11 @@ func (d *Driver) Ping(ctx context.Context) error {
 // Close satisfies core.Driver. Elasticsearch HTTP client has no explicit close.
 func (d *Driver) Close() error { return nil }
 
+// ListTargets returns an error as Elasticsearch target listing is not implemented.
+func (d *Driver) ListTargets(ctx context.Context) ([]string, error) {
+	return nil, fmt.Errorf("elasticsearch: ListTargets not supported")
+}
+
 // EnsureTarget satisfies SchemaAwareDriver.
 func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
 	// Check if index exists
