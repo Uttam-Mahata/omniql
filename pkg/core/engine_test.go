@@ -34,6 +34,12 @@ func (m *mockDriver) Execute(_ context.Context, _ core.OQLQuery) ([]map[string]i
 func (m *mockDriver) BatchInsert(_ context.Context, _ string, docs []map[string]interface{}) ([]map[string]interface{}, error) {
 	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
 }
+func (m *mockDriver) ListTargets(_ context.Context) ([]string, error) {
+	return []string{"mock_table"}, nil
+}
+func (m *mockDriver) EnsureTarget(_ context.Context, _ string, _ *core.CollectionSchema) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Engine tests

@@ -46,6 +46,19 @@ func (d *MockDriver) BatchInsert(ctx context.Context, target string, docs []map[
 	return []map[string]interface{}{{"count": int64(len(docs))}}, nil
 }
 
+func (d *MockDriver) ListTargets(_ context.Context) ([]string, error) {
+	targets := make([]string, 0, len(d.data))
+	for t := range d.data {
+		targets = append(targets, t)
+	}
+	return targets, nil
+}
+
+func (d *MockDriver) EnsureTarget(ctx context.Context, target string, schema *CollectionSchema) error {
+	// No-op for mock
+	return nil
+}
+
 func TestMigrate(t *testing.T) {
 	src := NewMockDriver("source_db")
 	dest := NewMockDriver("dest_db")
@@ -115,5 +128,40 @@ func TestMigrateDryRun(t *testing.T) {
 
 	if len(dest.data["items_migrated"]) != 0 {
 		t.Errorf("expected 0 records in dest, got %d", len(dest.data["items_migrated"]))
+	}
+}
+
+func TestMigrateAll(t *testing.T) {
+	src := NewMockDriver("source_db_all")
+	dest := NewMockDriver("dest_db_all")
+
+	// Seed source with multiple tables
+	src.data["table1"] = []map[string]interface{}{{"id": 1}, {"id": 2}}
+	src.data["table2"] = []map[string]interface{}{{"val": "a"}, {"val": "b"}, {"val": "c"}}
+
+	e := NewEngine()
+	e.RegisterDriver(src)
+	e.RegisterDriver(dest)
+
+	// MigrateAll
+	res, err := e.MigrateAll(context.Background(), "source_db_all", "dest_db_all", MigrateOptions{BatchSize: 2})
+	if err != nil {
+		t.Fatalf("migrate all failed: %v", err)
+	}
+
+	// table1 (2 recs) + table2 (3 recs) = 5 total
+	if res.RecordsRead != 5 {
+		t.Errorf("expected 5 read, got %d", res.RecordsRead)
+	}
+	if res.RecordsWritten != 5 {
+		t.Errorf("expected 5 written, got %d", res.RecordsWritten)
+	}
+
+	// Verify destination has data
+	if len(dest.data["table1"]) != 2 {
+		t.Errorf("expected 2 records in table1, got %d", len(dest.data["table1"]))
+	}
+	if len(dest.data["table2"]) != 3 {
+		t.Errorf("expected 3 records in table2, got %d", len(dest.data["table2"]))
 	}
 }

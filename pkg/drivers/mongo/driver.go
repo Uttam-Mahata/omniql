@@ -40,6 +40,11 @@ func (d *Driver) Close() error {
 	return d.client.Disconnect(context.Background())
 }
 
+// ListTargets returns a list of collections in the database.
+func (d *Driver) ListTargets(ctx context.Context) ([]string, error) {
+	return d.client.Database(d.dbName).ListCollectionNames(ctx, bson.D{})
+}
+
 // EnsureTarget satisfies SchemaAwareDriver.
 func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
 	// MongoDB creates collections implicitly. No action needed.
