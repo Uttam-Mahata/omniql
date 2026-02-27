@@ -48,6 +48,11 @@ func (d *Driver) Close() error {
 	return d.client.Close()
 }
 
+// EnsureTarget satisfies SchemaAwareDriver.
+func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
+	return nil
+}
+
 // Execute dispatches the OQL query to the appropriate Redis operation.
 func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
 	switch query.Action {

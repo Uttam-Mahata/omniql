@@ -87,3 +87,35 @@ func validateFilter(filter map[string]interface{}, schema CollectionSchema, targ
 	}
 	return nil
 }
+
+// InferSchema builds a CollectionSchema from a document's key-value pairs.
+func InferSchema(target string, doc map[string]interface{}) CollectionSchema {
+	schema := CollectionSchema{
+		Name:   target,
+		Fields: make(map[string]FieldSchema),
+	}
+	for key, val := range doc {
+		schema.Fields[key] = FieldSchema{Type: InferFieldType(val)}
+	}
+	return schema
+}
+
+// InferFieldType determines the FieldType from a Go value.
+func InferFieldType(val interface{}) FieldType {
+	switch val.(type) {
+	case string:
+		return FieldTypeString
+	case float64:
+		return FieldTypeFloat
+	case int, int64:
+		return FieldTypeInt
+	case bool:
+		return FieldTypeBool
+	case []interface{}:
+		return FieldTypeArray
+	case map[string]interface{}:
+		return FieldTypeObject
+	default:
+		return FieldTypeAny
+	}
+}
