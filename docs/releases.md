@@ -28,8 +28,9 @@ v<major>.<minor>.<patch>-beta.<n>  → beta     (e.g. v0.9.0-beta.1)
 ## Cutting a release
 
 ```bash
-# 1. Update the base version in bindings/python/pyproject.toml
-#    (this is the single source of truth for all ecosystems)
+# 1. (Optional) Update the base version in bindings/python/pyproject.toml
+#    Only needed for nightly SNAPSHOT builds — tagged releases use the tag
+#    version directly and override pyproject.toml at publish time.
 
 # 2. Push the appropriate tag
 git tag v0.9.0-beta.1 && git push origin v0.9.0-beta.1
@@ -39,6 +40,17 @@ git tag v0.9.0        && git push origin v0.9.0
 
 The publish workflow detects the tag suffix and sets the correct version
 string and distribution channel for every ecosystem automatically.
+
+> **Note — tag version vs. pyproject.toml version**
+>
+> For all tagged releases (stable, rc, beta) the published version is taken
+> directly from the git tag, **not** from `bindings/python/pyproject.toml`.
+> The workflow overwrites `pyproject.toml` at build time with the tag version.
+> This means a tag like `v1.0.1` will publish `1.0.1` across all ecosystems
+> even if `pyproject.toml` still reads `0.8.1`.
+>
+> `pyproject.toml` only influences the nightly build, where its value is used
+> as the base for the `-nightly.YYYYMMDD` / `-SNAPSHOT` suffix.
 
 ---
 

@@ -154,6 +154,17 @@ func (e *Engine) Drivers() []string {
 	return names
 }
 
+// Routes returns a snapshot of all explicit target→driver route mappings.
+func (e *Engine) Routes() map[string]string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	snapshot := make(map[string]string, len(e.routes))
+	for k, v := range e.routes {
+		snapshot[k] = v
+	}
+	return snapshot
+}
+
 func errorResponse(err error, code string) *OmniJSON {
 	return &OmniJSON{
 		Data: []map[string]interface{}{},

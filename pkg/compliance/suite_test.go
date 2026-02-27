@@ -3,7 +3,7 @@
 // behavioural parity.
 //
 // SQLite (in-memory) always runs.  PostgreSQL runs when POSTGRES_DSN is set.
-// MongoDB runs when MONGO_URI and MONGO_DB are set.
+// MySQL runs when MYSQL_DSN is set.  MongoDB runs when MONGO_URI and MONGO_DB are set.
 package compliance_test
 
 import (
@@ -14,13 +14,14 @@ import (
 	"sort"
 	"testing"
 
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	drvmysql "github.com/Uttam-Mahata/omniql/pkg/drivers/mysql"
 	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
 	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
-
-	_ "github.com/lib/pq"
 )
 
 // ----------------------------------------------------------------------------
@@ -45,6 +46,35 @@ func sqliteDriver(t *testing.T) (core.Driver, func()) {
 		t.Fatalf("sqlite create table: %v", err)
 	}
 	return drvsqlite.NewFromDB(db), func() { db.Close() }
+}
+
+// mysqlDriver creates a MySQL driver when MYSQL_DSN is set.
+func mysqlDriver(t *testing.T) (core.Driver, func()) {
+	t.Helper()
+	dsn := os.Getenv("MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("MYSQL_DSN not set; skipping MySQL compliance tests")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("mysql open: %v", err)
+	}
+	// Create / reset test table.
+	db.Exec(`DROP TABLE IF EXISTS products`)
+	_, err = db.Exec(`CREATE TABLE products (
+		id       INT AUTO_INCREMENT PRIMARY KEY,
+		name     VARCHAR(200) NOT NULL,
+		price    DOUBLE       NOT NULL DEFAULT 0,
+		category VARCHAR(100) NOT NULL DEFAULT '',
+		stock    INT          NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatalf("mysql create table: %v", err)
+	}
+	return drvmysql.NewFromDB(db), func() {
+		db.Exec(`DROP TABLE IF EXISTS products`)
+		db.Close()
+	}
 }
 
 // postgresDriver creates a PostgreSQL driver when POSTGRES_DSN is set.
@@ -955,6 +985,18 @@ func TestCompliance_Postgres_Success(t *testing.T) {
 
 func TestCompliance_Postgres_Errors(t *testing.T) {
 	drv, cleanup := postgresDriver(t)
+	defer cleanup()
+	runComplianceWithErrors(t, drv)
+}
+
+func TestCompliance_MySQL_Success(t *testing.T) {
+	drv, cleanup := mysqlDriver(t)
+	defer cleanup()
+	runSuccessCompliance(t, drv)
+}
+
+func TestCompliance_MySQL_Errors(t *testing.T) {
+	drv, cleanup := mysqlDriver(t)
 	defer cleanup()
 	runComplianceWithErrors(t, drv)
 }
