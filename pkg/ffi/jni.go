@@ -100,3 +100,47 @@ func Java_io_omniql_OmniEngine_nativeRegisterMongoDriver(env *C.JNIEnv, class C.
 
 	return C.jni_new_string(env, result)
 }
+
+//export Java_io_omniql_OmniEngine_nativeRegisterMySQLDriver
+func Java_io_omniql_OmniEngine_nativeRegisterMySQLDriver(env *C.JNIEnv, class C.jclass, handle C.jint, dsn C.jstring) C.jstring {
+	cDSN := C.jni_get_string(env, dsn)
+	defer C.jni_release_string(env, dsn, cDSN)
+
+	result := OmniQL_RegisterMySQLDriver(C.int(handle), cDSN)
+	defer C.free(unsafe.Pointer(result))
+
+	return C.jni_new_string(env, result)
+}
+
+//export Java_io_omniql_OmniEngine_nativeRegisterSQLServerDriver
+func Java_io_omniql_OmniEngine_nativeRegisterSQLServerDriver(env *C.JNIEnv, class C.jclass, handle C.jint, dsn C.jstring) C.jstring {
+	cDSN := C.jni_get_string(env, dsn)
+	defer C.jni_release_string(env, dsn, cDSN)
+
+	result := OmniQL_RegisterSQLServerDriver(C.int(handle), cDSN)
+	defer C.free(unsafe.Pointer(result))
+
+	return C.jni_new_string(env, result)
+}
+
+//export Java_io_omniql_OmniEngine_nativeRegisterRedisDriver
+func Java_io_omniql_OmniEngine_nativeRegisterRedisDriver(env *C.JNIEnv, class C.jclass, handle C.jint, url C.jstring) C.jstring {
+	cURL := C.jni_get_string(env, url)
+	defer C.jni_release_string(env, url, cURL)
+
+	result := OmniQL_RegisterRedisDriver(C.int(handle), cURL)
+	defer C.free(unsafe.Pointer(result))
+
+	return C.jni_new_string(env, result)
+}
+
+//export Java_io_omniql_OmniEngine_nativeRegisterElasticsearchDriver
+func Java_io_omniql_OmniEngine_nativeRegisterElasticsearchDriver(env *C.JNIEnv, class C.jclass, handle C.jint, addr C.jstring) C.jstring {
+	cAddr := C.jni_get_string(env, addr)
+	defer C.jni_release_string(env, addr, cAddr)
+
+	result := OmniQL_RegisterElasticsearchDriver(C.int(handle), cAddr)
+	defer C.free(unsafe.Pointer(result))
+
+	return C.jni_new_string(env, result)
+}

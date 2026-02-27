@@ -4,6 +4,7 @@ Version-specific documentation for OmniQL.
 
 | Version | Highlights |
 |---------|------------|
+| [v0.7.0](v0.7.0/README.md) | SQL Server driver, Redis driver, sqlutil shared WHERE builder, terminal convenience methods for all bindings, MySQL in compliance suite, fuzz tests |
 | [v0.6.0](v0.6.0/README.md) | MySQL driver, batchInsert API for all bindings, compliance suite, omniql.yaml config, GoReleaser |
 | [v0.5.0](v0.5.0/README.md) | Nested field support, deterministic fallback driver, BatchInsert end-to-end, schema recursion |
 | [v0.4.0](v0.4.0/README.md) | Logical operators ($or/$and), Sort, Projection, Insert returning data, Mongo tests |

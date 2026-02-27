@@ -20,12 +20,16 @@ import (
 	"unsafe"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
+	drvels "github.com/Uttam-Mahata/omniql/pkg/drivers/elasticsearch"
 	drvmongo "github.com/Uttam-Mahata/omniql/pkg/drivers/mongo"
 	drvmysql "github.com/Uttam-Mahata/omniql/pkg/drivers/mysql"
 	drvpostgres "github.com/Uttam-Mahata/omniql/pkg/drivers/postgres"
+	drvredis "github.com/Uttam-Mahata/omniql/pkg/drivers/redis"
 	drvsqlite "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlite"
+	drvsqlserver "github.com/Uttam-Mahata/omniql/pkg/drivers/sqlserver"
 	_ "github.com/go-sql-driver/mysql"            // MySQL database/sql driver
 	_ "github.com/lib/pq"                         // Postgres database/sql driver
+	_ "github.com/microsoft/go-mssqldb"           // SQL Server database/sql driver
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -242,6 +246,72 @@ func errorJSON(code, message string) *C.char {
 		},
 	}
 	data, _ := json.Marshal(resp)
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterSQLServerDriver opens a SQL Server connection using the
+// provided DSN (e.g. "sqlserver://sa:Pass@localhost:1433?database=test"),
+// registers the driver with the engine, and returns {"driver":"sqlserver"} on success.
+//
+// Returns JSON {"driver":"sqlserver"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterSQLServerDriver
+func OmniQL_RegisterSQLServerDriver(handle C.int, dsn *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	drv, err := drvsqlserver.New(C.GoString(dsn))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("sqlserver: %v", err))
+	}
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterRedisDriver creates a Redis driver using the provided URL
+// (e.g. "redis://:password@host:6379/0"), registers it with the engine, and
+// returns {"driver":"redis"} on success.
+//
+// Returns JSON {"driver":"redis"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterRedisDriver
+func OmniQL_RegisterRedisDriver(handle C.int, url *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	drv, err := drvredis.New(C.GoString(url))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("redis: %v", err))
+	}
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
+	return C.CString(string(data))
+}
+
+// OmniQL_RegisterElasticsearchDriver creates an Elasticsearch driver using the
+// provided address (e.g. "http://localhost:9200"), registers it with the engine,
+// and returns {"driver":"elasticsearch"} on success.
+//
+// Returns JSON {"driver":"elasticsearch"} on success or a JSON-encoded error on failure.
+// The caller is responsible for freeing the returned C string with OmniQL_Free.
+//
+//export OmniQL_RegisterElasticsearchDriver
+func OmniQL_RegisterElasticsearchDriver(handle C.int, addr *C.char) *C.char {
+	engine := getEngine(handle)
+	if engine == nil {
+		return errorJSON("INVALID_HANDLE", "unknown engine handle")
+	}
+	drv, err := drvels.New(C.GoString(addr))
+	if err != nil {
+		return errorJSON("DRIVER_INIT_ERROR", fmt.Sprintf("elasticsearch: %v", err))
+	}
+	engine.RegisterDriver(drv)
+	data, _ := json.Marshal(map[string]string{"driver": drv.Name()})
 	return C.CString(string(data))
 }
 

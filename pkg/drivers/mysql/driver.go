@@ -10,7 +10,8 @@ import (
 	"strings"
 
 	"github.com/Uttam-Mahata/omniql/pkg/core"
-	_ "github.com/go-sql-driver/mysql" // MySQL database driver
+	"github.com/Uttam-Mahata/omniql/pkg/drivers/sqlutil"
+	_ "github.com/go-sql-driver/mysql" // MySQL database/sql driver
 )
 
 const driverName = "mysql"
@@ -61,7 +62,7 @@ func (d *Driver) Execute(ctx context.Context, query core.OQLQuery) ([]map[string
 }
 
 func (d *Driver) find(ctx context.Context, query core.OQLQuery) ([]map[string]interface{}, int64, error) {
-	where, args, err := buildWhere(query.Filter)
+	where, args, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Question, quote, translateColumn, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -182,19 +183,24 @@ func (d *Driver) BatchInsert(ctx context.Context, target string, docs []map[stri
 	defer tx.Rollback()
 
 	first := docs[0]
-	cols := make([]string, 0, len(first))
+	// Sort column names for deterministic ordering.
 	colOrder := make([]string, 0, len(first))
-	placeholders := make([]string, 0, len(first))
 	for col := range first {
-		cols = append(cols, quote(col))
 		colOrder = append(colOrder, col)
-		placeholders = append(placeholders, "?")
+	}
+	sort.Strings(colOrder)
+
+	cols := make([]string, 0, len(colOrder))
+	ph := make([]string, 0, len(colOrder))
+	for _, col := range colOrder {
+		cols = append(cols, quote(col))
+		ph = append(ph, "?")
 	}
 
 	stmtStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 		quote(target),
 		strings.Join(cols, ", "),
-		strings.Join(placeholders, ", "),
+		strings.Join(ph, ", "),
 	)
 
 	stmt, err := tx.PrepareContext(ctx, stmtStr)
@@ -235,7 +241,7 @@ func (d *Driver) update(ctx context.Context, query core.OQLQuery) ([]map[string]
 		args = append(args, val)
 	}
 
-	where, whereArgs, err := buildWhere(query.Filter)
+	where, whereArgs, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Question, quote, translateColumn, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -258,7 +264,7 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 	if len(query.Filter) == 0 {
 		return nil, 0, fmt.Errorf("mysql: DELETE requires a non-empty filter to prevent accidental bulk deletes")
 	}
-	where, args, err := buildWhere(query.Filter)
+	where, args, _, err := sqlutil.BuildWhere(query.Filter, sqlutil.Question, quote, translateColumn, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -274,110 +280,6 @@ func (d *Driver) delete(ctx context.Context, query core.OQLQuery) ([]map[string]
 	}
 	affected, _ := result.RowsAffected()
 	return []map[string]interface{}{}, affected, nil
-}
-
-// buildWhere translates an OQL Filter into a parameterised SQL WHERE clause.
-// MySQL uses ? as the parameter placeholder.
-func buildWhere(filter core.Filter) (string, []interface{}, error) {
-	if len(filter) == 0 {
-		return "", nil, nil
-	}
-
-	clauses := make([]string, 0, len(filter))
-	args := make([]interface{}, 0, len(filter))
-
-	for field, constraint := range filter {
-		if field == "$or" || field == "$and" {
-			list, ok := toSlice(constraint)
-			if !ok {
-				return "", nil, fmt.Errorf("mysql: %s requires a slice", field)
-			}
-			subClauses := make([]string, 0, len(list))
-			for _, item := range list {
-				subFilter, ok := item.(map[string]interface{})
-				if !ok {
-					return "", nil, fmt.Errorf("mysql: %s elements must be objects", field)
-				}
-				subWhere, subArgs, err := buildWhere(subFilter)
-				if err != nil {
-					return "", nil, err
-				}
-				if subWhere != "" {
-					subClauses = append(subClauses, "("+subWhere+")")
-					args = append(args, subArgs...)
-				}
-			}
-			op := " OR "
-			if field == "$and" {
-				op = " AND "
-			}
-			if len(subClauses) > 0 {
-				clauses = append(clauses, "("+strings.Join(subClauses, op)+")")
-			}
-			continue
-		}
-
-		switch c := constraint.(type) {
-		case map[string]interface{}:
-			for op, val := range c {
-				switch op {
-				case "$eq":
-					clauses = append(clauses, translateColumn(field)+" = ?")
-					args = append(args, val)
-				case "$ne":
-					clauses = append(clauses, translateColumn(field)+" != ?")
-					args = append(args, val)
-				case "$lt":
-					clauses = append(clauses, translateColumn(field)+" < ?")
-					args = append(args, val)
-				case "$lte":
-					clauses = append(clauses, translateColumn(field)+" <= ?")
-					args = append(args, val)
-				case "$gt":
-					clauses = append(clauses, translateColumn(field)+" > ?")
-					args = append(args, val)
-				case "$gte":
-					clauses = append(clauses, translateColumn(field)+" >= ?")
-					args = append(args, val)
-				case "$in":
-					if vals, ok := toSlice(val); ok {
-						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("mysql: $in requires non-empty slice")
-						}
-						placeholders := make([]string, len(vals))
-						for i, v := range vals {
-							placeholders[i] = "?"
-							args = append(args, v)
-						}
-						clauses = append(clauses, translateColumn(field)+" IN ("+strings.Join(placeholders, ", ")+")")
-					} else {
-						return "", nil, fmt.Errorf("mysql: $in requires a slice")
-					}
-				case "$nin":
-					if vals, ok := toSlice(val); ok {
-						if len(vals) == 0 {
-							return "", nil, fmt.Errorf("mysql: $nin requires non-empty slice")
-						}
-						placeholders := make([]string, len(vals))
-						for i, v := range vals {
-							placeholders[i] = "?"
-							args = append(args, v)
-						}
-						clauses = append(clauses, translateColumn(field)+" NOT IN ("+strings.Join(placeholders, ", ")+")")
-					} else {
-						return "", nil, fmt.Errorf("mysql: $nin requires a slice")
-					}
-				default:
-					return "", nil, fmt.Errorf("mysql: unsupported operator %q", op)
-				}
-			}
-		default:
-			clauses = append(clauses, translateColumn(field)+" = ?")
-			args = append(args, constraint)
-		}
-	}
-
-	return strings.Join(clauses, " AND "), args, nil
 }
 
 // scanRows converts *sql.Rows into a slice of generic maps.
@@ -430,12 +332,6 @@ func translateColumn(field string) string {
 
 	// ->> returns unquoted text value (equivalent to JSON_UNQUOTE(JSON_EXTRACT(...)))
 	return fmt.Sprintf("%s->>'%s'", col, path)
-}
-
-// toSlice converts interface{} to []interface{} if possible.
-func toSlice(v interface{}) ([]interface{}, bool) {
-	s, ok := v.([]interface{})
-	return s, ok
 }
 
 // fieldProjectionValue returns (true, nil) for inclusion (1), (false, nil) for

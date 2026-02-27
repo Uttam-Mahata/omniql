@@ -127,6 +127,26 @@ export class OmniEngine {
     return (JSON.parse(raw) as { driver: string }).driver ?? 'mongo';
   }
 
+  registerMySQLDriver(dsn: string): string {
+    const raw: string = bridge.registerMySQLDriver(this.handle, dsn);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'mysql';
+  }
+
+  registerSQLServerDriver(dsn: string): string {
+    const raw: string = bridge.registerSQLServerDriver(this.handle, dsn);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'sqlserver';
+  }
+
+  registerRedisDriver(url: string): string {
+    const raw: string = bridge.registerRedisDriver(this.handle, url);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'redis';
+  }
+
+  registerElasticsearchDriver(addr: string): string {
+    const raw: string = bridge.registerElasticsearchDriver(this.handle, addr);
+    return (JSON.parse(raw) as { driver: string }).driver ?? 'elasticsearch';
+  }
+
   async batchInsert<T = Record<string, unknown>>(
     target: string,
     docs: Record<string, unknown>[],
@@ -135,6 +155,66 @@ export class OmniEngine {
     const json = JSON.stringify(payload);
     const rawResponse = bridge.execute(this.handle, json);
     return JSON.parse(rawResponse) as OmniResult<T>;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Terminal convenience methods
+  // ---------------------------------------------------------------------------
+
+  /** Return all documents matching filter. */
+  async findMany<T = Record<string, unknown>>(
+    target: string,
+    filter?: Filter,
+    options?: QueryOptions,
+  ): Promise<T[]> {
+    const result = await this.execute<T>({ target, action: 'FIND', filter, options });
+    if (result.error) throw new Error(`findMany error: ${result.error.code}: ${result.error.message}`);
+    return result.data;
+  }
+
+  /** Return the first matching document, or undefined. */
+  async findFirst<T = Record<string, unknown>>(
+    target: string,
+    filter?: Filter,
+  ): Promise<T | undefined> {
+    const result = await this.execute<T>({ target, action: 'FIND', filter, options: { limit: 1 } });
+    if (result.error) throw new Error(`findFirst error: ${result.error.code}: ${result.error.message}`);
+    return result.data[0];
+  }
+
+  /** Return the count of matching documents. */
+  async count(target: string, filter?: Filter): Promise<number> {
+    const result = await this.execute({ target, action: 'COUNT', filter });
+    if (result.error) throw new Error(`count error: ${result.error.code}: ${result.error.message}`);
+    return result.meta.total;
+  }
+
+  /** Insert a single document. */
+  async insertOne<T = Record<string, unknown>>(
+    target: string,
+    document: Record<string, unknown>,
+  ): Promise<OmniResult<T>> {
+    const result = await this.execute<T>({ target, action: 'INSERT', document });
+    if (result.error) throw new Error(`insertOne error: ${result.error.code}: ${result.error.message}`);
+    return result;
+  }
+
+  /** Update all documents matching filter. */
+  async updateMany(
+    target: string,
+    filter: Filter,
+    update: Record<string, unknown>,
+  ): Promise<OmniResult> {
+    const result = await this.execute({ target, action: 'UPDATE', filter, document: update });
+    if (result.error) throw new Error(`updateMany error: ${result.error.code}: ${result.error.message}`);
+    return result;
+  }
+
+  /** Delete all documents matching filter. */
+  async deleteMany(target: string, filter: Filter): Promise<OmniResult> {
+    const result = await this.execute({ target, action: 'DELETE', filter });
+    if (result.error) throw new Error(`deleteMany error: ${result.error.code}: ${result.error.message}`);
+    return result;
   }
 
   close(): void {

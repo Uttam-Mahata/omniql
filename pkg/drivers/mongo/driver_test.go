@@ -41,7 +41,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.users",
 			mtest.FirstBatch,
-			bson.D{{"n", int32(1)}},
+			bson.D{{Key: "n", Value: int32(1)}},
 		))
 
 		// Mock Find response
@@ -50,7 +50,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.users",
 			mtest.FirstBatch,
-			bson.D{{"_id", objID}, {"name", "Alice"}, {"age", 30}},
+			bson.D{{Key: "_id", Value: objID}, {Key: "name", Value: "Alice"}, {Key: "age", Value: 30}},
 		))
 
 		res, count, err = d.Execute(context.Background(), core.OQLQuery{
@@ -79,7 +79,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.products",
 			mtest.FirstBatch,
-			bson.D{{"n", int32(1)}},
+			bson.D{{Key: "n", Value: int32(1)}},
 		))
 
 		// Mock Find response
@@ -87,7 +87,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.products",
 			mtest.FirstBatch,
-			bson.D{{"_id", primitive.NewObjectID()}, {"price", 100}},
+			bson.D{{Key: "_id", Value: primitive.NewObjectID()}, {Key: "price", Value: 100}},
 		))
 
 		res, count, err := d.Execute(context.Background(), core.OQLQuery{
@@ -114,7 +114,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.products",
 			mtest.FirstBatch,
-			bson.D{{"n", int32(2)}},
+			bson.D{{Key: "n", Value: int32(2)}},
 		))
 
 		// Mock Find response
@@ -122,8 +122,8 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.products",
 			mtest.FirstBatch,
-			bson.D{{"_id", primitive.NewObjectID()}, {"price", 20}},
-			bson.D{{"_id", primitive.NewObjectID()}, {"price", 10}},
+			bson.D{{Key: "_id", Value: primitive.NewObjectID()}, {Key: "price", Value: 20}},
+			bson.D{{Key: "_id", Value: primitive.NewObjectID()}, {Key: "price", Value: 10}},
 		))
 
 		res, _, err := d.Execute(context.Background(), core.OQLQuery{
@@ -149,7 +149,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.users",
 			mtest.FirstBatch,
-			bson.D{{"n", int32(1)}},
+			bson.D{{Key: "n", Value: int32(1)}},
 		))
 
 		// Mock Find response
@@ -157,7 +157,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.users",
 			mtest.FirstBatch,
-			bson.D{{"_id", primitive.NewObjectID()}, {"name", "Bob"}},
+			bson.D{{Key: "_id", Value: primitive.NewObjectID()}, {Key: "name", Value: "Bob"}},
 		))
 
 		res, _, err := d.Execute(context.Background(), core.OQLQuery{
@@ -183,7 +183,7 @@ func TestMongoDriver(t *testing.T) {
 			0,
 			"testdb.users",
 			mtest.FirstBatch,
-			bson.D{{"n", int32(5)}},
+			bson.D{{Key: "n", Value: int32(5)}},
 		))
 
 		res, count, err := d.Execute(context.Background(), core.OQLQuery{
@@ -206,9 +206,9 @@ func TestMongoDriver(t *testing.T) {
 
 		// Mock UpdateMany response
 		mt.AddMockResponses(bson.D{
-			{"ok", 1},
-			{"n", int32(1)},
-			{"nModified", int32(1)},
+			{Key: "ok", Value: 1},
+			{Key: "n", Value: int32(1)},
+			{Key: "nModified", Value: int32(1)},
 		})
 
 		res, count, err := d.Execute(context.Background(), core.OQLQuery{
@@ -233,8 +233,8 @@ func TestMongoDriver(t *testing.T) {
 
 		// Mock DeleteMany response
 		mt.AddMockResponses(bson.D{
-			{"ok", 1},
-			{"n", int32(1)},
+			{Key: "ok", Value: 1},
+			{Key: "n", Value: int32(1)},
 		})
 
 		res, count, err := d.Execute(context.Background(), core.OQLQuery{
