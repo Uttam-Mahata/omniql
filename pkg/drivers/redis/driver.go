@@ -48,6 +48,11 @@ func (d *Driver) Close() error {
 	return d.client.Close()
 }
 
+// ListTargets returns an error as Redis does not support listing targets in a structured way.
+func (d *Driver) ListTargets(ctx context.Context) ([]string, error) {
+	return nil, fmt.Errorf("redis: ListTargets not supported")
+}
+
 // EnsureTarget satisfies SchemaAwareDriver.
 func (d *Driver) EnsureTarget(ctx context.Context, target string, schema *core.CollectionSchema) error {
 	return nil

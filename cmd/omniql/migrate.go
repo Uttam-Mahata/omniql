@@ -14,20 +14,20 @@ import (
 // runMigrateMode handles the 'migrate' subcommand.
 func runMigrateMode() {
 	configFlag := flag.String("config", "omniql.yaml", "Path to omniql.yaml config file")
-	sourceFlag := flag.String("source", "", "Source target name")
-	destFlag   := flag.String("dest", "", "Destination target name")
+	sourceFlag := flag.String("source", "", "Source target name (single table)")
+	destFlag   := flag.String("dest", "", "Destination target name (single table)")
+	sourceDriverFlag := flag.String("source-driver", "", "Source driver name (full migration)")
+	destDriverFlag   := flag.String("dest-driver", "", "Destination driver name (full migration)")
 	batchFlag  := flag.Int("batch", 100, "Batch size")
 	dryRunFlag := flag.Bool("dry-run", false, "Dry run (don't write)")
+
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: omniql migrate -config <file> -source <target> -dest <target> [options]")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  Single table: omniql migrate -config <file> -source <target> -dest <target> [options]")
+		fmt.Fprintln(os.Stderr, "  Full DB:      omniql migrate -config <file> -source-driver <name> -dest-driver <name> [options]")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-
-	if *sourceFlag == "" || *destFlag == "" {
-		flag.Usage()
-		os.Exit(1)
-	}
 
 	cfg, err := LoadConfig(*configFlag)
 	if err != nil {
@@ -47,8 +47,21 @@ func runMigrateMode() {
 		DryRun:    *dryRunFlag,
 	}
 
-	fmt.Fprintf(os.Stderr, "Migrating from %q to %q...\n", *sourceFlag, *destFlag)
-	result, err := engine.Migrate(context.Background(), *sourceFlag, *destFlag, opts)
+	var result *core.MigrateResult
+
+	if *sourceFlag != "" && *destFlag != "" {
+		// Single table migration
+		fmt.Fprintf(os.Stderr, "Migrating target %q to %q...\n", *sourceFlag, *destFlag)
+		result, err = engine.Migrate(context.Background(), *sourceFlag, *destFlag, opts)
+	} else if *sourceDriverFlag != "" && *destDriverFlag != "" {
+		// Full database migration
+		fmt.Fprintf(os.Stderr, "Migrating all targets from driver %q to %q...\n", *sourceDriverFlag, *destDriverFlag)
+		result, err = engine.MigrateAll(context.Background(), *sourceDriverFlag, *destDriverFlag, opts)
+	} else {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	if err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}

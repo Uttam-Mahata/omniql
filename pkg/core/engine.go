@@ -173,6 +173,17 @@ func (e *Engine) selectDriver(target string) (Driver, error) {
 	return nil, fmt.Errorf("%w: %q", ErrNoDrivers, target)
 }
 
+// GetDriver returns the driver with the given name.
+func (e *Engine) GetDriver(name string) (Driver, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	d, ok := e.drivers[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrDriverNotFound, name)
+	}
+	return d, nil
+}
+
 // Drivers returns a snapshot of all registered driver names.
 func (e *Engine) Drivers() []string {
 	e.mu.RLock()
