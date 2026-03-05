@@ -1,18 +1,13 @@
 name: Publish to Registries
 
 # Trigger strategy:
-#   Nightly  — scheduled daily from dev branch
-#   Beta     — push tag v*-beta.*   (e.g. v0.9.0-beta.1)
 #   RC       — push tag v*-rc.*     (e.g. v0.9.0-rc.1)
 #   Stable   — push tag v*          (e.g. v0.9.0)
-#   Manual   — workflow_dispatch for on-demand nightly
 on:
-  schedule:
-    - cron: '0 2 * * *'   # Nightly at 02:00 UTC from default branch
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+      - '!v*-beta.*'
 
 jobs:
   get-version:
@@ -27,16 +22,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: versioning
         run: |
-          BASE_VERSION=$(grep "^version =" bindings/python/pyproject.toml | cut -d '"' -f 2 | cut -d '-' -f 1)
-
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/v}
-            if [[ $TAG == *-beta.* ]]; then
-              VERSION=$TAG
-              MAVEN_VERSION=$TAG
-              RELEASE_TYPE="beta"
-              NPM_TAG="beta"
-            elif [[ $TAG == *-rc.* ]]; then
+            if [[ $TAG == *-rc.* ]]; then
               VERSION=$TAG
               MAVEN_VERSION=$TAG
               RELEASE_TYPE="rc"
@@ -48,12 +36,8 @@ jobs:
               NPM_TAG="latest"
             fi
           else
-            # Nightly (schedule or workflow_dispatch)
-            DATE=$(date +%Y%m%d)
-            VERSION="$BASE_VERSION-nightly.$DATE"
-            MAVEN_VERSION=""   # Maven not published on nightly (GitHub Packages rejects SNAPSHOT PUT)
-            RELEASE_TYPE="nightly"
-            NPM_TAG="nightly"
+            echo "Error: This workflow must be triggered by a version tag (v*)."
+            exit 1
           fi
 
           echo "Release type : $RELEASE_TYPE"
@@ -196,7 +180,7 @@ jobs:
 
   goreleaser:
     name: GoReleaser — CLI Distribution
-    # Only run GoReleaser on stable and rc/beta tag pushes (not nightly).
+    # Only run GoReleaser on stable and rc tag pushes.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [get-version]
     runs-on: ubuntu-latest
@@ -224,7 +208,7 @@ jobs:
   publish-maven:
     name: Publish Java Package to GitHub Packages
     # GitHub Packages Maven registry does not support SNAPSHOT (timestamped) PUT paths.
-    # Only publish on tags (beta / rc / stable).
+    # Only publish on tags (rc / stable).
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-core, get-version]
     runs-on: ubuntu-latest

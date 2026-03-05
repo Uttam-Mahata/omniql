@@ -132,7 +132,7 @@ The bindings are standalone files and do not form part of the Go module.
 
 ## CI/CD & Release Strategy
 
-Releases are tag-driven. **Do not push to `dev` to publish packages** — the publish workflow only runs on tags and the nightly schedule.
+Releases are tag-driven. **Do not push to `dev` to publish packages** — the publish workflow only runs on tags.
 
 ### Release types & tag conventions
 
@@ -140,15 +140,10 @@ Releases are tag-driven. **Do not push to `dev` to publish packages** — the pu
 |---|---|---|
 | Stable | `v<major>.<minor>.<patch>` | `v0.7.0` |
 | Release Candidate | `v<version>-rc.<n>` | `v0.7.0-rc.1` |
-| Beta | `v<version>-beta.<n>` | `v0.7.0-beta.1` |
-| Nightly | *(scheduled — no tag needed)* | runs daily at 02:00 UTC |
 
 ### Cutting a release
 
 ```bash
-# Beta
-git tag v0.7.0-beta.1 && git push origin v0.7.0-beta.1
-
 # Release candidate
 git tag v0.7.0-rc.1 && git push origin v0.7.0-rc.1
 
@@ -160,8 +155,6 @@ git tag v0.7.0 && git push origin v0.7.0
 
 | Type | Python / NuGet / Maven JAR | npm dist-tag | Maven | CLI binaries |
 |---|---|---|---|---|
-| nightly | `0.7.0-nightly.YYYYMMDD` | `nightly` | `0.7.0-SNAPSHOT` | — |
-| beta | `0.7.0-beta.1` | `beta` | `0.7.0-beta.1` | GoReleaser |
 | rc | `0.7.0-rc.1` | `next` | `0.7.0-rc.1` | GoReleaser |
 | stable | `0.7.0` | `latest` | `0.7.0` | GoReleaser |
 

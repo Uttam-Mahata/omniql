@@ -467,3 +467,4 @@ class OmniEngine:
         """Delete matching documents asynchronously."""
         loop = self._get_loop()
         return await loop.run_in_executor(None, self.delete_many_sync, target, filter)
+from .model import OmniModel, Field, StringField, IntField, FloatField, BoolField

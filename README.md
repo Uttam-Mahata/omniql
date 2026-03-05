@@ -3,11 +3,7 @@
 > **Version:** v0.7.0
 > **Module:** `github.com/Uttam-Mahata/omniql`
 
-OmniQL is a unified data access layer that abstracts away the complexity of
-database-specific protocols and languages. It exposes a single, model-agnostic
-query format — **OQL (OmniQL Query Language)** — and routes queries to
-pluggable database drivers, returning results in a standardised **OmniJSON**
-format.
+OmniQL is an Embedded Unified Data Interface (UDI) built in Go. It leverages native FFI (Foreign Function Interface) bindings to provide a zero-infrastructure, low-latency query engine for Python, TypeScript, Java, and .NET. By abstracting database dialects into a standardized JSON-native specification (OQL)., OmniQL enables developers to write a single query that can run across multiple databases without modification.
 
 ---
 
@@ -286,53 +282,40 @@ engine.close();
 
 ## Releases & Versioning
 
-OmniQL publishes four release tiers across all package ecosystems:
+OmniQL publishes two release tiers across all package ecosystems:
 
 | Tier | When | Version format |
 |------|------|----------------|
 | **Stable** | Tag `v0.9.0` | `0.9.0` |
 | **Release Candidate** | Tag `v0.9.0-rc.1` | `0.9.0-rc.1` |
-| **Beta** | Tag `v0.9.0-beta.1` | `0.9.0-beta.1` |
-| **Nightly** | Daily at 02:00 UTC | `0.9.0-nightly.20260223` |
 
 ### Installing a specific tier
 
 **Python**
 ```bash
 pip install omniql                        # stable
-pip install omniql==0.9.0-beta.1          # beta
-pip install omniql==0.9.0-nightly.20260223  # nightly (pre-release)
+pip install omniql==0.9.0-rc.1            # release candidate
 ```
 
 **npm**
 ```bash
 npm install omniql           # stable (latest)
-npm install omniql@beta      # beta
 npm install omniql@next      # release candidate
-npm install omniql@nightly   # nightly
 ```
 
 **NuGet (.NET)**
 ```bash
 dotnet add package OmniQL                       # stable
-dotnet add package OmniQL --version 0.9.0-beta.1  # beta
-dotnet add package OmniQL --version 0.9.0-nightly.20260223 --prerelease  # nightly
+dotnet add package OmniQL --version 0.9.0-rc.1  # release candidate
 ```
 
 **Maven (Java)**
 ```xml
-<!-- Stable / Beta / RC -->
+<!-- Stable / RC -->
 <dependency>
     <groupId>io.github.uttam-mahata</groupId>
     <artifactId>omniql</artifactId>
     <version>0.9.0</version>
-</dependency>
-
-<!-- Nightly (SNAPSHOT) — add GitHub Packages repository first -->
-<dependency>
-    <groupId>io.github.uttam-mahata</groupId>
-    <artifactId>omniql</artifactId>
-    <version>0.9.0-SNAPSHOT</version>
 </dependency>
 ```
 
